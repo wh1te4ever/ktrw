@@ -1,0 +1,16 @@
+KERNELCACHE UUID:	4BABC377-01E4-32C6-8D5D-2362877CF9FE
+DEVICE:		iPhone10,1 18E212
+
+__disable_preemption	0xFFFFFFF007BA3CDC
+__enable_preemption	0xFFFFFFF007BA3D04
+__mh_execute_header	0xFFFFFFF007004000
+_const_boot_args	0xFFFFFFF007722440
+_IOSleep		0xFFFFFFF008002CE4
+_kernel_map		0xFFFFFFF007720E30
+_kernel_memory_allocate	0xFFFFFFF007B222E4
+_kernel_thread_start	0xFFFFFFF007AC4970
+_ml_nofault_copy	0xFFFFFFF007BAB82C
+_panic			0xFFFFFFF0092132F4
+_paniclog_append_noflush	0xFFFFFFF007A99E58
+_thread_deallocate	0xFFFFFFF007AC2AC4
+_vsnprintf		0xFFFFFFF007ED851C

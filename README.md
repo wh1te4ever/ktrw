@@ -13,6 +13,20 @@ no longer used.
 [checkra1n]: https://checkra.in
 [pongoOS]: https://github.com/checkra1n/pongoOS
 
+Changes for iOS 14.x
+===================================================================================================
+1. OSKext_init_patch MAX_SEARCH changed to 300 instead of 30 so the patch is actually applied
+2. CTRR/KTRR patches from xnuspy were shoved in
+3. OSKext::slidePrelinkedExecutable zeroes vmaddr, so it needs to be patched to not do that
+4. Need to actually slide all segments' vmaddr inside kext_map (inside the pongo module)
+
+I suspect the last two are a result of me not understanding some changes made
+to the XNU kext loading code, but as asm patches they work fine so I don't
+see the need to spend more time on that.
+
+Right now things are hardcoded for the iPhone 8 running iOS 14.5.1. I plan
+to write patchfinders for the offsets you'd normally put in a text file
+inside the kernel_symbols directory.
 
 Bypassing KTRR
 ---------------------------------------------------------------------------------------------------

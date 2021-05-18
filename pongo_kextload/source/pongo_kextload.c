@@ -19,6 +19,9 @@
 
 #include "pongo.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 #include <mach-o/reloc.h>
@@ -618,11 +621,23 @@ kext_map(struct kext_load_info *info) {
 	// Update virtual addresses in the load commands, in particular, LC_SEGMENT_64, to the
 	// corresponding kernelcache static addresses.
 	mh = info->kext;
+    printf("%s: kext @ %#llx (unslid %#llx)\n", __func__, mh, (uintptr_t)mh-kernel_slide);
 	lc = (void *) (mh + 1);
 	for (uint32_t cmd_idx = 0; cmd_idx < mh->ncmds; cmd_idx++) {
 		if (lc->cmd == LC_SEGMENT_64) {
 			struct segment_command_64 *sc = (void *) lc;
 			sc->vmaddr = sc->vmaddr - info->vm_base + sa_for_ptr(info->kext);
+            sc->vmaddr += kernel_slide;
+            printf("%s: set %s's segment vmaddr to %p (slid %p)\n", __func__,
+                    sc->segname, sc->vmaddr, sc->vmaddr + kernel_slide);
+            /* if(cmd_idx == 4){ */
+                /* sc->maxprot = VM_PROT_WRITE | VM_PROT_EXECUTE; */
+                /* sc->initprot = VM_PROT_WRITE | VM_PROT_EXECUTE; */
+                /* sc->maxprot = 0x40+cmd_idx; */
+                /* sc->initprot = 0x40+cmd_idx; */
+            /* } */
+            /* sc->vmaddr = 0x41414141; */
+            /* sc->vmsize = 0x128000; */
 			// TODO: Update sections. This is not strictly needed by XNU.
 		}
 		lc = (void *) ((uintptr_t) lc + lc->cmdsize);
@@ -921,32 +936,75 @@ RESOLVE_ADRP_ADD(uint32_t *insn) {
 }
 
 // Called to patch the KTRR MMU lockdown instruction sequence.
-static bool
-ktrr_mmu_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
-	uint32_t *insn = cacheable_stream;
-	puts("Disabling KTRR MMU lockdown");
-	insn[0] = 0xD503201F;	// NOP
-	insn[2] = 0xD503201F;	// NOP
-	insn[4] = 0xD503201F;	// NOP
-	return true;
+/* static bool */
+/* ktrr_mmu_patch(xnu_pf_patch_t *patch, void *cacheable_stream) { */
+/* 	uint32_t *insn = cacheable_stream; */
+/* 	puts("Disabling KTRR MMU lockdown"); */
+/* 	insn[0] = 0xD503201F;	// NOP */
+/* 	insn[2] = 0xD503201F;	// NOP */
+/* 	insn[4] = 0xD503201F;	// NOP */
+/* 	return true; */
+/* } */
+
+static bool ktrr_mmu_patch(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* This also hits rorgn_lockdown, where the AMCC CTRR patches are,
+     * but it's easier for me to separate them since the instruction
+     * sequences are so different */
+    static int count = 1;
+    uint32_t *opcode_stream = cacheable_stream;
+
+    *opcode_stream = 0xd503201f;
+    opcode_stream[1] = 0xd503201f;
+    opcode_stream[3] = 0xd503201f;
+
+    if(count == 2){
+        xnu_pf_disable_patch(patch);
+        puts("KTRW: disabled KTRR MMU lockdown");
+    }
+
+    count++;
+
+    return true;
 }
 
 // Called to patch the KTRR AMCC lockdown instruction sequence.
-static bool
-ktrr_amcc_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
-	uint32_t *insn = cacheable_stream;
-	puts("Disabling KTRR AMCC lockdown");
-	insn[0] = 0xD503201F;	// NOP
-	insn[2] = 0xD503201F;	// NOP
-	insn[3] = 0xD503201F;	// NOP
-	insn[4] = 0xD503201F;	// NOP
-	return true;
+/* static bool */
+/* ktrr_amcc_patch(xnu_pf_patch_t *patch, void *cacheable_stream) { */
+/* 	uint32_t *insn = cacheable_stream; */
+/* 	puts("Disabling KTRR AMCC lockdown"); */
+/* 	insn[0] = 0xD503201F;	// NOP */
+/* 	insn[2] = 0xD503201F;	// NOP */
+/* 	insn[3] = 0xD503201F;	// NOP */
+/* 	insn[4] = 0xD503201F;	// NOP */
+/* 	return true; */
+/* } */
+
+static bool ctrr_patch(xnu_pf_patch_t *patch, void *cacheable_stream){
+    /* On 14.x A10+ there doesn't seem to be a specific lock for
+     * RoRgn, instead we've got these AMCC CTRR registers. We are
+     * patching three of them: lock, enable, and write-disable. See
+     * find_lock_group_data and rorgn_lockdown for more info. */
+    static int count = 1;
+    uint32_t *opcode_stream = cacheable_stream;
+
+    /* str w0, [x16, x17] --> str wzr, [x16, x17] */
+    opcode_stream[5] = 0xb8316a1f;
+
+    if(count == 3){
+        xnu_pf_disable_patch(patch);
+        puts("KTRW: disabled AMCC CTRR MMU lockdown");
+    }
+
+    count++;
+
+    return true;
 }
 
 // Called to patch the OSKext::initWithPrelinkedInfoDict() function.
 static bool
 OSKext_init_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
-	const int MAX_SEARCH = 30;
+	const int MAX_SEARCH = 300;
 	uint32_t *insn = cacheable_stream;
 	// First we need to resolve the ADRP/ADD target at [2].
 	void *target = RESOLVE_ADRP_ADD(&insn[2]);
@@ -987,6 +1045,7 @@ OSKext_init_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
 	// Patch the instruction to zero out doCoalesedSlides:
 	// 	MOV  Xn, XZR
 	*x2_insn |= 0x001F0000;
+    printf("%s: Patched OSKext::initWithPrelinkedInfoDict\n", __func__);
 	// We no longer need to match this. Disabling the patch speeds up execution time, since the
 	// pattern is pretty frequent.
 	xnu_pf_disable_patch(patch);
@@ -1002,45 +1061,113 @@ OSKext_init_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
 //        _PrelinkKASLROffsets kernelcaches, but it is safe to apply always.)
 static void
 kextload_patch() {
+    /* iPhone 8 14.5.1, patches ml_static_protect %p < %p panic to
+     * a BRK so I can see registers */
+    uint32_t *ml_static_protect_panic = ptr_for_sa(0xFFFFFFF007BAB5F4);
+    *ml_static_protect_panic = 0xd4200000;
+    /* iPhone 8 14.5.1, patches OSKext::slidePrelinkedExecutable to
+     * not zero vmaddr */
+    uint32_t *p = ptr_for_sa(0xFFFFFFF007FBB18C);
+    *p = 0xD503201F;
+
+    /* iPhone 8 14.5.1 - redirect OSKextLog messages to IOLog */
+    /* p = ptr_for_sa(0xFFFFFFF007FC2194); */
+    /* mov x0, x2 */
+    /* *p = 0xAA0203E0; */
+    /* p = ptr_for_sa(0xFFFFFFF007FC2198); */
+    /* b _IOLog */
+    /* *p = 0x140102dd; */
+
+    /* iPhone 8 14.5.1 - doprnt_hide_pointers patch */
+    p = ptr_for_sa(0xFFFFFFF00923059C);
+    *p = 0;
+
+    /* iPhone 8 14.5.1 - panic instead of printing error message about
+     * some page %p not being backed by physical memory */
+    p = ptr_for_sa(0xFFFFFFF007FBD190);
+    /* ldp x0, x1, [x20, #0x18] so I can see vmaddr and vmsize in x0&x1 */
+    *p = 0xA9418680;
+    p = ptr_for_sa(0xFFFFFFF007FBD194);
+    /* ldp w2, w3, [x20, #0x38] so I can see maxprot and initprot in x2 and x3 */
+    *p = 0x29470E82;
+    p = ptr_for_sa(0xFFFFFFF007FBD198);
+    *p = 0xd4200000;
+
+
 	xnu_pf_patchset_t *patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
 
 	// Patch out KTRR MMU lockdown.
-	const uint32_t ktrr_mmu_count = 5;
-	uint64_t ktrr_mmu_match[ktrr_mmu_count] = {
-		0xD51CF260,	// [0]  MSR  s3_4_c15_c2_3, Xn
-		0x00000000,	// [1]  ?
-		0xD51CF280,	// [2]  MSR  s3_4_c15_c2_4, Xn
-		0x00000000,	// [3]  ?
-		0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn
-	};
-	uint64_t ktrr_mmu_mask[ktrr_mmu_count] = {
-		0xFFFFFFE0,	// [0]  MSR
-		0x00000000,	// [1]  ?
-		0xFFFFFFE0,	// [2]  MSR
-		0x00000000,	// [3]  ?
-		0xFFFFFFE0,	// [4]  MSR
-	};
-	xnu_pf_maskmatch(patchset, ktrr_mmu_match, ktrr_mmu_mask, ktrr_mmu_count,
-			true, ktrr_mmu_patch);
+	const uint32_t ktrr_mmu_count = 4;
+	/* uint64_t ktrr_mmu_match[ktrr_mmu_count] = { */
+	/* 	0xD51CF260,	// [0]  MSR  s3_4_c15_c2_3, Xn */
+	/* 	0x00000000,	// [1]  ? */
+	/* 	0xD51CF280,	// [2]  MSR  s3_4_c15_c2_4, Xn */
+	/* 	0x00000000,	// [3]  ? */
+	/* 	0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn */
+	/* }; */
+	/* uint64_t ktrr_mmu_mask[ktrr_mmu_count] = { */
+	/* 	0xFFFFFFE0,	// [0]  MSR */
+	/* 	0x00000000,	// [1]  ? */
+	/* 	0xFFFFFFE0,	// [2]  MSR */
+	/* 	0x00000000,	// [3]  ? */
+	/* 	0xFFFFFFE0,	// [4]  MSR */
+	/* }; */
+
+    uint64_t ktrr_mmu_match[ktrr_mmu_count] = {
+        0xd51cf260,     /* msr s3_4_c15_c2_3, xn */
+        0xd51cf280,     /* msr s3_4_c15_c2_4, xn */
+        0x52800020,     /* mov (x|w)n, 1 */
+        0xd51cf240,     /* msr s3_4_c15_c2_2, xn */
+    };
+
+    uint64_t ktrr_mmu_mask[ktrr_mmu_count] = {
+        0xffffffe0,     /* ignore Rt */
+        0xffffffe0,     /* ignore Rt */
+        0x7fffffe0,     /* ignore Rd */
+        0xffffffe0,     /* ignore Rt */
+    };
+
+	xnu_pf_maskmatch(patchset, "KTRR patcher", ktrr_mmu_match,
+            ktrr_mmu_mask, ktrr_mmu_count, false, ktrr_mmu_patch);
 
 	// Patch out KTRR AMCC lockdown.
-	const uint32_t ktrr_amcc_count = 5;
-	uint64_t ktrr_amcc_match[ktrr_amcc_count] = {
-		0xB907EC00,	// [0]  STR  Wn, [Xn,#0x7EC]
-		0xD5033FDF,	// [1]  ISB
-		0xD51CF260,	// [2]  MSR  s3_4_c15_c2_3, Xn
-		0xD51CF280,	// [3]  MSR  s3_4_c15_c2_4, Xn
-		0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn
-	};
-	uint64_t ktrr_amcc_mask[ktrr_amcc_count] = {
-		0xFFFFFC00,	// [0]  STR
-		0xFFFFFFFF,	// [1]  ISB
-		0xFFFFFFE0,	// [2]  MSR
-		0xFFFFFFE0,	// [3]  MSR
-		0xFFFFFFE0,	// [4]  MSR
-	};
-	xnu_pf_maskmatch(patchset, ktrr_amcc_match, ktrr_amcc_mask, ktrr_amcc_count,
-			true, ktrr_amcc_patch);
+	const uint32_t ktrr_amcc_count = 6;
+	/* uint64_t ktrr_amcc_match[ktrr_amcc_count] = { */
+	/* 	0xB907EC00,	// [0]  STR  Wn, [Xn,#0x7EC] */
+	/* 	0xD5033FDF,	// [1]  ISB */
+	/* 	0xD51CF260,	// [2]  MSR  s3_4_c15_c2_3, Xn */
+	/* 	0xD51CF280,	// [3]  MSR  s3_4_c15_c2_4, Xn */
+	/* 	0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn */
+	/* }; */
+	/* uint64_t ktrr_amcc_mask[ktrr_amcc_count] = { */
+	/* 	0xFFFFFC00,	// [0]  STR */
+	/* 	0xFFFFFFFF,	// [1]  ISB */
+	/* 	0xFFFFFFE0,	// [2]  MSR */
+	/* 	0xFFFFFFE0,	// [3]  MSR */
+	/* 	0xFFFFFFE0,	// [4]  MSR */
+	/* }; */
+
+    /* XXX rename later */
+    uint64_t ktrr_amcc_match[ktrr_amcc_count] = {
+        0xb94001d1,     /* ldr w17, [x14] */
+        0x1b0f7e31,     /* mul x17, w17, w15 */
+        0x8b110210,     /* add x16, x16, x17 */
+        0x0,            /* ignore this instruction */
+        0x0,            /* ignore this instruction */
+        0xb8316a00,     /* str w0, [x16, x17] */
+    };
+
+    uint64_t ktrr_amcc_mask[ktrr_amcc_count] = {
+        0xffffffff,     /* match exactly */
+        0xffffffff,     /* match exactly */
+        0xffffffff,     /* match exactly */
+        0x0,            /* ignore this instruction */
+        0x0,            /* ignore this instruction */
+        0xffffffff,     /* match exactly */
+    };
+
+	xnu_pf_maskmatch(patchset, "CTRR patcher", ktrr_amcc_match,
+            ktrr_amcc_mask, ktrr_amcc_count, false, ctrr_patch);
 
 	// Patch the prologue of OSKext::initWithPrelinkedInfoDict() to set doCoalesedSlides to
 	// false. This enables the call to OSKext::setVMAttributes() later in the function on
@@ -1063,8 +1190,9 @@ kextload_patch() {
 		0xFFE0FFFF,	// [4]  MOV
 		0xFFFFFC1F,	// [5]  BLR
 	};
-	xnu_pf_maskmatch(patchset, OSKext_init_match, OSKext_init_mask, OSKext_init_count,
-			true, OSKext_init_patch);
+	xnu_pf_maskmatch(patchset, "OSKext::initWithPrelinkedInfoDict patcher",
+            OSKext_init_match, OSKext_init_mask, OSKext_init_count,
+			false, OSKext_init_patch);
 
 	// Run the patchset to patch the kernel.
 	xnu_pf_emit(patchset);

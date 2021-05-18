@@ -2,7 +2,7 @@ TARGET = kextload.pongo-module
 
 ARCH = arm64
 SDK  = iphoneos
-ABI  = aapcs
+# ABI  = aapcs
 
 SYSROOT := $(shell xcrun --sdk $(SDK) --show-sdk-path)
 ifeq ($(SYSROOT),)
@@ -11,10 +11,10 @@ endif
 CLANG := $(shell xcrun --sdk $(SDK) --find clang)
 CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
 
-CFLAGS  = -mabi=$(ABI) -fno-builtin -fno-common -mkernel
+CFLAGS  =  -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource/third_party
-CFLAGS += -O2
-CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion
+# CFLAGS += -O2
+CFLAGS += -Wall -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion
 
 LDFLAGS  = -Xlinker -kext -nostdlib -Xlinker -fatal_warnings
 

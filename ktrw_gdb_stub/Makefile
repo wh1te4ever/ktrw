@@ -4,6 +4,7 @@ ARCH = arm64
 SDK  = iphoneos
 KTRW_VERSION = 0.1.0
 ACTIVATION_DELAY = 30
+# ACTIVATION_DELAY = 0
 
 SYSROOT := $(shell xcrun --sdk $(SDK) --show-sdk-path)
 ifeq ($(SYSROOT),)

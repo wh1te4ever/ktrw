@@ -900,8 +900,11 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 	if (kextload_module == NULL) {
 		return false;
 	}
+    printf("%s: sep auto...\n", __func__);
+    pongo_usb_send_command(pongo, "sep auto\n", 0);
+    sleep(2);
 	// Set boot arguments to "-v". This clears the ramdisk and enables verbose boot.
-	pongo_usb_send_command(pongo, "xargs -v\n", 0);
+	pongo_usb_send_command(pongo, "xargs -v kextlog=7\n", 0);
 	// Allow XNU to use the framebuffer for verbose boot.
 	pongo_usb_send_command(pongo, "xfb\n", 0);
 	// Upload the kextload pongoOS module.
