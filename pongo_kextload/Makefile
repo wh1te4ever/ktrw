@@ -2,7 +2,6 @@ TARGET = kextload.pongo-module
 
 ARCH = arm64
 SDK  = iphoneos
-# ABI  = aapcs
 
 SYSROOT := $(shell xcrun --sdk $(SDK) --show-sdk-path)
 ifeq ($(SYSROOT),)
@@ -18,9 +17,19 @@ CFLAGS += -Wall -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion
 
 LDFLAGS  = -Xlinker -kext -nostdlib -Xlinker -fatal_warnings
 
-SOURCES = source/pongo_kextload.c
+# TODO: add pf stuff
+SOURCES = source/asm.c \
+		  source/common.c \
+		  source/pongo_kextload.c \
+		  source/pf/14/pf.c
 
-HEADERS = source/third_party/pongo.h
+HEADERS = source/third_party/pongo.h \
+		  source/asm.h \
+		  source/common.h \
+		  source/pf/offsets.h \
+		  source/pf/pf_common.h \
+		  source/pf/pfs.h \
+		  source/pf/14/pf.h
 
 $(TARGET): $(SOURCES) $(HEADERS)
 	$(CC) $(CFLAGS) $(DEFINES) $(LDFLAGS) -o $@ $(SOURCES)

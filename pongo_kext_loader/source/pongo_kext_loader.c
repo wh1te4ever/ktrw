@@ -900,19 +900,28 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 	if (kextload_module == NULL) {
 		return false;
 	}
-    printf("%s: sep auto...\n", __func__);
-    pongo_usb_send_command(pongo, "sep auto\n", 0);
+    printf("%s: uploading module...\n", __func__);
     sleep(2);
-	// Set boot arguments to "-v". This clears the ramdisk and enables verbose boot.
-	pongo_usb_send_command(pongo, "xargs -v kextlog=7\n", 0);
-	// Allow XNU to use the framebuffer for verbose boot.
-	pongo_usb_send_command(pongo, "xfb\n", 0);
+
 	// Upload the kextload pongoOS module.
 	pongo_usb_init_bulk_upload(pongo);
 	pongo_usb_send_bulk_data(pongo, kextload_module, kextload_module_size);
 	pongo_usb_send_command(pongo, "modload\n", 0);
 	// Unmap the module.
 	unmap_file(kextload_module, kextload_module_size);
+
+    printf("%s: ktrw-getkernelv...\n", __func__);
+    pongo_usb_send_command(pongo, "ktrw-getkernelv\n", 0);
+    sleep(2);
+
+    printf("%s: patchfinder...\n", __func__);
+    pongo_usb_send_command(pongo, "ktrwpf\n", 0);
+    sleep(2);
+
+	// Set boot arguments to "-v". This clears the ramdisk and enables verbose boot.
+	pongo_usb_send_command(pongo, "xargs -v\n", 0);
+	// Allow XNU to use the framebuffer for verbose boot.
+	pongo_usb_send_command(pongo, "xfb\n", 0);
 	// Sleep awhile to let the command process before executing the next command.
 	// TODO: Do this asynchronously.
 	usleep(200 * 1000);
@@ -923,20 +932,21 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 static bool
 pongo_kext_load_symbols(pongo_usb_device pongo) {
 	// Generate the symbol table.
-	kernelcache_symbol_table symbol_table = kernelcache_symbol_table_generate();
-	if (symbol_table.data == NULL) {
-		ERROR("Could not generate symbol table");
-		return false;
-	}
-	// Upload the symbol table.
-	pongo_usb_init_bulk_upload(pongo);
-	pongo_usb_send_bulk_data(pongo, symbol_table.data, symbol_table.size);
-	pongo_usb_send_command(pongo, "kernelcache-symbols\n", 0);
-	// Destroy the symbol table.
-	kernelcache_symbol_table_destroy(symbol_table);
-	// Sleep awhile to let the command process before executing the next command.
-	// TODO: Do this asynchronously.
-	usleep(200 * 1000);
+	/* kernelcache_symbol_table symbol_table = kernelcache_symbol_table_generate(); */
+	/* if (symbol_table.data == NULL) { */
+	/* 	ERROR("Could not generate symbol table"); */
+	/* 	return false; */
+	/* } */
+	/* // Upload the symbol table. */
+	/* pongo_usb_init_bulk_upload(pongo); */
+	/* pongo_usb_send_bulk_data(pongo, symbol_table.data, symbol_table.size); */
+	/* pongo_usb_send_command(pongo, "kernelcache-symbols\n", 0); */
+	/* // Destroy the symbol table. */
+	/* kernelcache_symbol_table_destroy(symbol_table); */
+	/* // Sleep awhile to let the command process before executing the next command. */
+	/* // TODO: Do this asynchronously. */
+	/* usleep(200 * 1000); */
+    printf("%s: skipping, because patchfinder already ran\n", __func__);
 	return true;
 }
 
@@ -1006,11 +1016,12 @@ pongo_instance_load_kext(struct pongo_instance *instance) {
 	if (!ok) {
 		goto fail;
 	}
-	printf("[%x] Loading kernel symbols\n", instance->device->service);
-	ok = pongo_kext_load_symbols(instance->device);
-	if (!ok) {
-		goto fail;
-	}
+    /* printf(" */
+	/* printf("[%x] Loading kernel symbols\n", instance->device->service); */
+	/* ok = pongo_kext_load_symbols(instance->device); */
+	/* if (!ok) { */
+	/* 	goto fail; */
+	/* } */
 	printf("[%x] Loading kernel extensions\n", instance->device->service);
 	for (size_t i = 0; i < kext_path_count; i++) {
 		ok = pongo_kext_load(instance->device, kext_path[i]);
@@ -1215,14 +1226,15 @@ fail_0:
 // Print usage information.
 _Noreturn static void
 usage() {
-	printf("%s -l <kextload-module> (-s <kernel-symbols>)... (-k <xnu-kext>)...\n"
+	printf("%s -l <kextload-module> -k <xnu-kext>\n"
 		"\n"
 		"Loads and boots an XNU kernel extension on all attached pongoOS devices.\n"
 		"\n"
 		"    <kextload-module>   The pongoOS kext loading module\n"
-		"    <kernel-symbols>    A directory containing kernel symbols\n"
 		"    <xnu-kext>          An XNU kernel extension to load into the kernelcache\n"
-		"\n",
+		"\n"
+        "This fork only supports loading the KTRW kext; please use the\n"
+        "original KTRW repository to load another kernel extension.\n",
 		getprogname());
 	exit(1);
 }
@@ -1277,10 +1289,12 @@ main(int argc, const char *argv[]) {
 		if (strcmp(arg, "-l") == 0) {
 			const char *path = next_arg();
 			handle_pongo_kextload_path(path);
-		} else if (strcmp(arg, "-s") == 0) {
-			const char *path = next_arg();
-			handle_symbols_path(path);
-		} else if (strcmp(arg, "-k") == 0) {
+		}
+        /* else if (strcmp(arg, "-s") == 0) { */
+			/* const char *path = next_arg(); */
+			/* handle_symbols_path(path); */
+		/* } */
+        else if (strcmp(arg, "-k") == 0) {
 			const char *path = next_arg();
 			handle_kext_path(path);
 		} else {
@@ -1292,10 +1306,10 @@ main(int argc, const char *argv[]) {
 		ERROR("No pongoOS kext loading module specified");
 		error = true;
 	}
-	if (kernelcache_symbols_path_count == 0) {
-		ERROR("No kernelcache symbols directory specified");
-		error = true;
-	}
+	/* if (kernelcache_symbols_path_count == 0) { */
+	/* 	ERROR("No kernelcache symbols directory specified"); */
+	/* 	error = true; */
+	/* } */
 	if (kext_path_count == 0) {
 		ERROR("No XNU kernel extensions specified");
 		error = true;

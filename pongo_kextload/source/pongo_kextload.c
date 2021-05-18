@@ -17,14 +17,17 @@
 // limitations under the License.
 //
 
-#include "pongo.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 #include <mach-o/reloc.h>
+
+#include "third_party/pongo.h"
+#include "common.h"
+#include "pf/pf_common.h"
+#include "pf/pfs.h"
 
 // ---- Configuration -----------------------------------------------------------------------------
 
@@ -60,202 +63,67 @@ strnlen(const char *s, size_t n) {
 
 // ---- Pointer conversions -----------------------------------------------------------------------
 
-static struct mach_header_64 *mh_execute_header;
-static uint64_t kernel_slide;
-
-#define sa_for_va(va)	((uint64_t) (va) - kernel_slide)
-#define va_for_sa(sa)	((uint64_t) (sa) + kernel_slide)
-#define ptr_for_sa(sa)	((void *) (((sa) - 0xFFFFFFF007004000uLL) + (uint8_t *) mh_execute_header))
-#define ptr_for_va(va)	(ptr_for_sa(sa_for_va(va)))
-#define sa_for_ptr(ptr)	((uint64_t) ((uint8_t *) (ptr) - (uint8_t *) mh_execute_header) + 0xFFFFFFF007004000uLL)
-#define va_for_ptr(ptr)	(va_for_sa(sa_for_ptr(ptr)))
-#define pa_for_ptr(ptr)	(sa_for_ptr(ptr) - gBootArgs->virtBase + gBootArgs->physBase)
+struct mach_header_64 *mh_execute_header;
+uint64_t kernel_slide;
 
 // ---- Symbol table ------------------------------------------------------------------------------
 
-// An in-memory symbol table for the current kernelcache.
-struct kernelcache_symbol_table {
-	struct kernelcache_symbol_table *next;
-	size_t count;
-	const char *const *symbol;
-	const uint64_t *address;
+uint64_t g__disable_preemption_addr = 0;
+uint64_t g__enable_preemption_addr = 0;
+uint64_t g_const_boot_args_addr = 0;
+uint64_t g_IOSleep_addr = 0;
+uint64_t g_kernel_map_addr = 0;
+uint64_t g_kernel_memory_allocate_addr = 0;
+uint64_t g_kernel_thread_start_addr = 0;
+uint64_t g_ml_nofault_copy_addr = 0;
+uint64_t g_panic_addr = 0;
+uint64_t g_paniclog_append_noflush_addr = 0;
+uint64_t g_thread_deallocate_addr = 0;
+uint64_t g_vsnprintf_addr = 0;
+
+/* Constants */
+static uint64_t g_mhaddr = 0xfffffff007004000;
+
+static struct kcsym {
+    const char *name;
+    uint64_t *val;
+} g_kcsyms[] = {
+    { "__disable_preemption", &g__disable_preemption_addr },
+    { "__enable_preemption", &g__enable_preemption_addr },
+    { "__mh_execute_header", &g_mhaddr },
+    { "_const_boot_args", &g_const_boot_args_addr },
+    { "_IOSleep", &g_IOSleep_addr },
+    { "_kernel_map", &g_kernel_map_addr },
+    { "_kernel_memory_allocate", &g_kernel_memory_allocate_addr },
+    { "_kernel_thread_start", &g_kernel_thread_start_addr },
+    { "_ml_nofault_copy", &g_ml_nofault_copy_addr },
+    { "_panic", &g_panic_addr },
+    { "_paniclog_append_noflush", &g_paniclog_append_noflush_addr },
+    { "_thread_deallocate", &g_thread_deallocate_addr },
+    { "_vsnprintf", &g_vsnprintf_addr },
 };
 
-// The chain of symbol tables for the current kernelcache.
-static struct kernelcache_symbol_table *kernelcache_symbol_table = NULL;
-
-// The UUID of the current kernelcache.
-static uint8_t kernelcache_uuid[16];
-
-// Whether the kernelcache UUID has been found by kernelcache_find_uuid().
-static bool kernelcache_uuid_found = false;
-
-// Find the UUID of the current kernelcache. Idempotent.
-static void
-kernelcache_find_uuid() {
-	if (kernelcache_uuid_found) {
-		return;
-	}
-	struct mach_header_64 *mh = mh_execute_header;
-	struct load_command *lc = (void *) (mh + 1);
-	uintptr_t lc_end = (uintptr_t) lc + mh->sizeofcmds;
-	for (uint32_t cmd_idx = 0; cmd_idx < mh->ncmds; cmd_idx++) {
-		if ((uintptr_t) lc + sizeof(*lc) > lc_end
-				|| (uintptr_t) lc + lc->cmdsize > lc_end) {
-			puts("Invalid kernel load commands");
-			return;
-		}
-		if (lc->cmd == LC_UUID) {
-			goto found;
-		}
-		lc = (void *) ((uintptr_t) lc + lc->cmdsize);
-	}
-	puts("Kernelcache UUID not found");
-	return;
-found:;
-	struct uuid_command *uc = (void *) lc;
-	memcpy(kernelcache_uuid, uc->uuid, sizeof(kernelcache_uuid));
-	kernelcache_uuid_found = true;
-}
-
-// Binary format of kernelcache symbol table upload data:
-// {
-//     @ offset 0:
-//     u32 kernelcache_count;
-//     u32 symbol_strings_offset;
-//     kernelcache_count * {
-//         u8 kernelcache_uuid[16];
-//         u32 kernelcache_symbols_offset;
-//     };
-//     @ kernelcache_symbols_offset:
-//     {
-//         u32 symbol_count;
-//         symbol_count * {
-//             u32 symbol_offset;
-//             u64 address;
-//         };
-//     };
-//     @ symbol_strings_offset:
-//     char symbol_strings[] {
-//         @ symbol_offset:
-//         char symbol[];
-//     }
-// }
-
-// Handles the "kernelcache-symbols" command, which is used to process the bulk uploaded data as a
-// serialized symbol table.
-static void
-command_kernelcache_symbols() {
-	// Grab the symbol table data.
-	size_t size = loader_xfer_recv_count;
-	loader_xfer_recv_count = 0;
-	uint8_t *_data = loader_xfer_recv_data;
-	// Make sure we have a kernelcache UUID.
-	kernelcache_find_uuid();
-	// Declare the allocation so that we can free it on the error path.
-	struct kernelcache_symbol_table *symbol_table = NULL;
-	// Set up state variables.
-	uint8_t *_p = _data;
-	uint8_t *const _end = _p + size;
-	// Access macros.
-#define ref(s)	({ if (_p + s > _end) { \
-		       goto parse_error; \
-		   } \
-		   void *_r = _p; \
-		   _p += s; \
-		   _r; })
-#define get(t)	({ *(t *) ref(sizeof(t)); })
-#define addr(o)	({ if (_data + o > _end) { \
-		       goto parse_error; \
-		   } \
-		   (void *) (_data + o); })
-#define seek(o)	({ _p = addr(o); })
-	// Parse the header.
-	uint32_t kernelcache_count = get(uint32_t);
-	uint32_t symbol_strings_offset = get(uint32_t);
-	for (uint32_t i = 0; i < kernelcache_count; i++) {
-		uint8_t *uuid = ref(sizeof(kernelcache_uuid));
-		uint32_t kernelcache_symbols_offset = get(uint32_t);
-		if (memcmp(uuid, kernelcache_uuid, sizeof(kernelcache_uuid)) == 0) {
-			seek(kernelcache_symbols_offset);
-			goto found_kernelcache;
-		}
-	}
-	// Not found.
-	puts("No matching kernelcache");
-	return;
-found_kernelcache:;
-	// Allocate the kernelcache symbol table.
-	uint32_t symbol_count = get(uint32_t);
-	size_t symbol_array_size = symbol_count * sizeof(symbol_table->symbol[0]);
-	size_t address_array_size = symbol_count * sizeof(symbol_table->address[0]);
-	size_t symbol_strings_size = size - symbol_strings_offset;
-	symbol_table = malloc(sizeof(*symbol_table)
-			+ symbol_array_size + address_array_size
-			+ symbol_strings_size);
-	if (symbol_table == NULL) {
-		puts("Failed to allocate symbol table");
-		goto fail;
-	}
-	// Initialize the kernelcache_symbol_table fields.
-	const char **symbols = (const char **) (symbol_table + 1);
-	uint64_t *addresses = (uint64_t *) ((uintptr_t) symbols + symbol_array_size);
-	symbol_table->count = symbol_count;
-	symbol_table->symbol = symbols;
-	symbol_table->address = addresses;
-	// Ensure the symbol strings data is null terminated.
-	char *symbol_table_strings = (char *) ((uintptr_t) addresses + address_array_size);
-	const char *symbol_strings = addr(symbol_strings_offset);
-	if (symbol_strings_size < 1) {
-		goto parse_error;
-	}
-	if (symbol_strings[symbol_strings_size - 1] != 0) {
-		goto parse_error;
-	}
-	// Populate the symbol table.
-	for (uint32_t i = 0; i < symbol_count; i++) {
-		uint32_t symbol_offset = get(uint32_t);
-		uint64_t address = get(uint64_t);
-		// We need at least one character (the null terminator) in the symbol; if we have
-		// that, then we're guaranteed that the string doesn't go out-of-bounds by the
-		// overall null-termination check above.
-		if (symbol_offset + 1 > symbol_strings_size) {
-			goto parse_error;
-		}
-		symbols[i] = symbol_table_strings + symbol_offset;
-		addresses[i] = address;
-	}
-	// Copy in the symbol table strings. This may include unneeded strings, but it's simpler
-	// than filtering.
-	seek(symbol_strings_offset);
-	memcpy(symbol_table_strings, ref(symbol_strings_size), symbol_strings_size);
-	// The symbol table is ready! Link it in at the head of the existing chain.
-	symbol_table->next = kernelcache_symbol_table;
-	kernelcache_symbol_table = symbol_table;
-	printf("Added %u kernelcache symbols", symbol_count);
-	return;
-parse_error:
-	puts("Invalid symbol table");
-fail:
-	if (symbol_table != NULL) {
-		free(symbol_table);
-	}
-#undef get
-#undef ref
-#undef seek
-}
+static const size_t g_nkcsyms = sizeof(g_kcsyms) / sizeof(*g_kcsyms);
 
 // Look up the static kernelcache address corresponding to the given named symbol.
 static uint64_t
 kernelcache_symbol_table_lookup(const char *symbol) {
-	const struct kernelcache_symbol_table *symbol_table = kernelcache_symbol_table;
-	for (; symbol_table != NULL; symbol_table = symbol_table->next) {
-		for (uint32_t i = 0; i < symbol_table->count; i++) {
-			if (strcmp(symbol_table->symbol[i], symbol) == 0) {
-				return symbol_table->address[i];
-			}
-		}
-	}
+    printf("%s: resolving symbol '%s'\n", __func__, symbol);
+
+    for(size_t i=0; i<g_nkcsyms; i++){
+        if(strcmp(g_kcsyms[i].name, symbol) == 0){
+            printf("%s: got val: %#llx\n", __func__, *g_kcsyms[i].val);
+            return *g_kcsyms[i].val;
+        }
+    }
+	/* const struct kernelcache_symbol_table *symbol_table = kernelcache_symbol_table; */
+	/* for (; symbol_table != NULL; symbol_table = symbol_table->next) { */
+	/* 	for (uint32_t i = 0; i < symbol_table->count; i++) { */
+	/* 		if (strcmp(symbol_table->symbol[i], symbol) == 0) { */
+	/* 			return symbol_table->address[i]; */
+	/* 		} */
+	/* 	} */
+	/* } */
 	return 0;
 }
 
@@ -621,7 +489,7 @@ kext_map(struct kext_load_info *info) {
 	// Update virtual addresses in the load commands, in particular, LC_SEGMENT_64, to the
 	// corresponding kernelcache static addresses.
 	mh = info->kext;
-    printf("%s: kext @ %#llx (unslid %#llx)\n", __func__, mh, (uintptr_t)mh-kernel_slide);
+    /* printf("%s: kext @ %#llx (unslid %#llx)\n", __func__, mh, (uintptr_t)mh-kernel_slide); */
 	lc = (void *) (mh + 1);
 	for (uint32_t cmd_idx = 0; cmd_idx < mh->ncmds; cmd_idx++) {
 		if (lc->cmd == LC_SEGMENT_64) {
@@ -897,168 +765,225 @@ command_kextload(const char *cmd, char *args) {
 // The next pre-boot hook in the chain.
 static void (*next_preboot_hook)(void);
 
-// Extract bits from an integer.
-static inline uintmax_t
-bits(uintmax_t x, unsigned sign, unsigned hi, unsigned lo, unsigned shift) {
-	const unsigned bits = sizeof(uintmax_t) * 8;
-	unsigned d = bits - (hi - lo + 1);
-	if (sign) {
-		return (uintmax_t) (((((intmax_t)  x) >> lo) << d) >> (d - shift));
-	} else {
-		return (((((uintmax_t) x) >> lo) << d) >> (d - shift));
-	}
-}
 
-// Test whether the instruction matches the specified pattern.
-static bool
-MATCH(uint32_t insn, uint32_t match, uint32_t mask) {
-	return ((insn & mask) == match);
-}
+/* Future-proofing for iOS 15+ */
+#define iOS_14_x                    (20)
 
-// Resolve an ADRP/ADD instruction sequence to the pointer to the target value.
-static void *
-RESOLVE_ADRP_ADD(uint32_t *insn) {
-	uint32_t adrp = insn[0];
-	uint32_t add  = insn[1];
-	// All registers must match. Also disallow SP.
-	unsigned reg0 = (unsigned) bits(adrp, 0, 4, 0, 0);
-	unsigned reg1 = (unsigned) bits(add,  0, 4, 0, 0);
-	unsigned reg2 = (unsigned) bits(add,  0, 9, 5, 0);
-	if (reg0 != reg1 || reg1 != reg2 || reg0 == 0x1f) {
-		return NULL;
-	}
-	// Compute the target address.
-	uint64_t pc = va_for_ptr(&insn[0]);
-	uint64_t imm0 = bits(adrp, 1, 23, 5, 12+2) | bits(adrp, 0, 30, 29, 12);
-	uint64_t imm1 = bits(add, 0, 21, 10, 0);
-	uint64_t target = (pc & ~0xFFFuLL) + imm0 + imm1;
-	return ptr_for_va(target);
-}
+#define VERSION_BIAS                iOS_14_x
 
-// Called to patch the KTRR MMU lockdown instruction sequence.
-/* static bool */
-/* ktrr_mmu_patch(xnu_pf_patch_t *patch, void *cacheable_stream) { */
-/* 	uint32_t *insn = cacheable_stream; */
-/* 	puts("Disabling KTRR MMU lockdown"); */
-/* 	insn[0] = 0xD503201F;	// NOP */
-/* 	insn[2] = 0xD503201F;	// NOP */
-/* 	insn[4] = 0xD503201F;	// NOP */
-/* 	return true; */
-/* } */
+static uint64_t g_kern_version_major = 0;
+static uint64_t g_kern_version_minor = 0;
+static uint32_t g_kern_version_revision = 0;
 
-static bool ktrr_mmu_patch(xnu_pf_patch_t *patch,
-        void *cacheable_stream){
-    /* This also hits rorgn_lockdown, where the AMCC CTRR patches are,
-     * but it's easier for me to separate them since the instruction
-     * sequences are so different */
-    static int count = 1;
-    uint32_t *opcode_stream = cacheable_stream;
+static bool getkernelv_callback(xnu_pf_patch_t *patch, void *cacheable_stream){
+    xnu_pf_disable_patch(patch);
 
-    *opcode_stream = 0xd503201f;
-    opcode_stream[1] = 0xd503201f;
-    opcode_stream[3] = 0xd503201f;
+    char *version = cacheable_stream;
 
-    if(count == 2){
-        xnu_pf_disable_patch(patch);
-        puts("KTRW: disabled KTRR MMU lockdown");
+    /* on all kernels, major, minor, and version are no larger than 2 chars */
+    char major_s[3] = {0};
+    char minor_s[3] = {0};
+    char revision_s[3] = {0};
+
+    /* skip ahead until we get a digit */
+    while(!isdigit(*version))
+        version++;
+
+    for(int i=0; *version != '.'; i++, version++)
+        major_s[i] = *version;
+
+    version++;
+
+    for(int i=0; *version != '.'; i++, version++)
+        minor_s[i] = *version;
+
+    version++;
+
+    for(int i=0; *version != ':'; i++, version++)
+        revision_s[i] = *version;
+
+    /* currently, I only use major and minor, but I get the rest in
+     * case I need them in the future */
+    g_kern_version_major = atoi(major_s);
+    g_kern_version_minor = atoi(minor_s);
+    g_kern_version_revision = atoi(revision_s);
+
+    if(g_kern_version_major == 19){
+        printf("KTRW: This fork does not\n"
+                " support iOS 13.x\n");
+        ktrw_fatal_error();
+    }
+    else if(g_kern_version_major == iOS_14_x){
+        printf("KTRW: iOS 14.x detected\n");
+    }
+    else{
+        printf("KTRW: error: unknown\n"
+                "  major %lld\n",
+                g_kern_version_major);
+
+        ktrw_fatal_error();
     }
 
-    count++;
+    queue_rx_string("sep auto\n");
 
     return true;
 }
 
-// Called to patch the KTRR AMCC lockdown instruction sequence.
-/* static bool */
-/* ktrr_amcc_patch(xnu_pf_patch_t *patch, void *cacheable_stream) { */
-/* 	uint32_t *insn = cacheable_stream; */
-/* 	puts("Disabling KTRR AMCC lockdown"); */
-/* 	insn[0] = 0xD503201F;	// NOP */
-/* 	insn[2] = 0xD503201F;	// NOP */
-/* 	insn[3] = 0xD503201F;	// NOP */
-/* 	insn[4] = 0xD503201F;	// NOP */
-/* 	return true; */
-/* } */
+#define MAXKEXTRANGE MAXPF
 
-static bool ctrr_patch(xnu_pf_patch_t *patch, void *cacheable_stream){
-    /* On 14.x A10+ there doesn't seem to be a specific lock for
-     * RoRgn, instead we've got these AMCC CTRR registers. We are
-     * patching three of them: lock, enable, and write-disable. See
-     * find_lock_group_data and rorgn_lockdown for more info. */
-    static int count = 1;
-    uint32_t *opcode_stream = cacheable_stream;
+struct kextrange {
+    xnu_pf_range_t *range;
+    char *kext;
+    char *seg;
+    char *sect;
+};
 
-    /* str w0, [x16, x17] --> str wzr, [x16, x17] */
-    opcode_stream[5] = 0xb8316a1f;
+/* purpose of this function is to add patchfinder ranges for kexts in such
+ * a way that there are no duplicates in `*ranges` */
+static void add_kext_range(struct kextrange **ranges, const char *kext,
+        const char *seg, const char *sect, size_t *nkextranges_out){
+    size_t nkextranges = *nkextranges_out;
 
-    if(count == 3){
-        xnu_pf_disable_patch(patch);
-        puts("KTRW: disabled AMCC CTRR MMU lockdown");
+    if(nkextranges == MAXKEXTRANGE)
+        return;
+
+    /* first, check if this kext is already present */
+    for(size_t i=0; i<nkextranges; i++){
+        struct kextrange *kr = ranges[i];
+
+        /* kext will never be NULL, otherwise, this function would have
+         * no point */
+        if(strcmp(kr->kext, kext) == 0){
+            /* same segment? It will be the same range even if the section differs */
+            if(seg && strcmp(kr->seg, seg) == 0)
+                return;
+
+            if(sect && strcmp(kr->sect, sect) == 0)
+                return;
+        }
     }
 
-    count++;
+    /* new kext, make its range */
+    struct mach_header_64 *mh = xnu_pf_get_kext_header(mh_execute_header, kext);
 
-    return true;
+    if(!mh){
+        printf( "KTRW: could not\n"
+                "   get Mach header for\n"
+                "   %s\n", kext);
+
+        ktrw_fatal_error();
+    }
+
+    struct kextrange *kr = malloc(sizeof(struct kextrange));
+    memset(kr, 0, sizeof(*kr));
+
+    if(sect)
+        kr->range = xnu_pf_section(mh, (void *)seg, (char *)sect);
+    else
+        kr->range = xnu_pf_segment(mh, (void *)seg);
+
+    size_t kextl = 0, segl = 0, sectl = 0;
+
+    kextl = strlen(kext);
+
+    char *kn = malloc(kextl + 1);
+    strcpy(kn, kext);
+    kn[kextl] = '\0';
+    kr->kext = kn;
+
+    if(seg){
+        segl = strlen(seg);
+        char *segn = malloc(segl + 1);
+        strcpy(segn, seg);
+        segn[segl] = '\0';
+        kr->seg = segn;
+    }
+
+    if(sect){
+        sectl = strlen(sect);
+        char *sectn = malloc(sectl + 1);
+        strcpy(sectn, sect);
+        sectn[sectl] = '\0';
+        kr->sect = sectn;
+    }
+
+    ranges[nkextranges] = kr;
+    *nkextranges_out = nkextranges + 1;
 }
 
-// Called to patch the OSKext::initWithPrelinkedInfoDict() function.
-static bool
-OSKext_init_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
-	const int MAX_SEARCH = 300;
-	uint32_t *insn = cacheable_stream;
-	// First we need to resolve the ADRP/ADD target at [2].
-	void *target = RESOLVE_ADRP_ADD(&insn[2]);
-	if (target == NULL) {
-		return false;
-	}
-	// Check if the target is "_PrelinkBundlePath", which indicates that this function is
-	// OSKext::initWithPrelinkedInfoDict(). Bailing here is the most common path.
-	if (strcmp(target, "_PrelinkBundlePath") != 0) {
-		return false;
-	}
-	puts("Patching OSKext::initWithPrelinkedInfoDict()");
-	// Search backwards until we get the prologue. Record the instruction that MOVs from X2.
-	uint32_t *x2_insn = NULL;
-	for (int i = 0;; i--) {
-		if (i < -MAX_SEARCH) {
-			return false;
-		}
-		// Check for either of the following instructions, signaling we hit the prologue:
-		// 	SUB  SP, SP, #0xNNN		;; 0xNNN < 0x400
-		// 	STP  X28, X27, [SP,#0xNNN]	;; 0xNNN < 0x100
-		bool prologue = MATCH(insn[i], 0xD10003FF, 0xFFF01FFF)
-			|| MATCH(insn[i], 0xA9006FFC, 0xFFC0FFFF);
-		if (prologue) {
-			break;
-		}
-		// Check for the instruction that saves argument X2, doCoalesedSlides:
-		// 	MOV  Xn, X2
-		bool mov_xn_x2 = MATCH(insn[i], 0xAA0203E0, 0xFFFFFFE0);
-		if (mov_xn_x2) {
-			x2_insn = &insn[i];
-		}
-	}
-	// Check that we found the target instruction.
-	if (x2_insn == NULL) {
-		return false;
-	}
-	// Patch the instruction to zero out doCoalesedSlides:
-	// 	MOV  Xn, XZR
-	*x2_insn |= 0x001F0000;
-    printf("%s: Patched OSKext::initWithPrelinkedInfoDict\n", __func__);
-	// We no longer need to match this. Disabling the patch speeds up execution time, since the
-	// pattern is pretty frequent.
-	xnu_pf_disable_patch(patch);
-	return true;
+static void command_getkernelv(const char *cmd, char *args){
+    xnu_pf_patchset_t *patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_8BIT);
+
+    xnu_pf_range_t *__TEXT___const = xnu_pf_section(mh_execute_header, "__TEXT",
+            "__const");
+
+    if(!__TEXT___const){
+        puts("KTRW: xnu_pf_section");
+        puts("   returned NULL for");
+        puts("   __TEXT:__const?");
+
+        ktrw_fatal_error();
+    }
+
+    const char *vers = "Darwin Kernel Version ";
+
+    /* hardcoded so clang does not generate ___chkstk_darwin calls */
+    uint64_t ver[21];
+    uint64_t masks[21];
+
+    for(int i=0; i<21; i++){
+        ver[i] = vers[i];
+        masks[i] = 0xff;
+    }
+
+    uint64_t count = sizeof(ver) / sizeof(*ver);
+
+    xnu_pf_maskmatch(patchset, "kernel version finder", ver, masks, count,
+            false, getkernelv_callback);
+    xnu_pf_emit(patchset);
+    xnu_pf_apply(__TEXT___const, patchset);
+    xnu_pf_patchset_destroy(patchset);
 }
 
-// Apply the kernel patches needed for running loaded kernel extensions.
-//
-//     1. Disable KTRR on the MMU and AMCC to ensure our kernel extension can run outside the KTRR
-//        RoRgn.
-//     2. Force OSKext::initWithPrelinkedInfoDict() to set doCoalesedSlides to false so that
-//        OSKext::setVMAttributes() is called. (Technically this is only needed on
-//        _PrelinkKASLROffsets kernelcaches, but it is safe to apply always.)
+static void command_ktrwpf(const char *cmd, char *args){
+    /* All the patchfinders in pf/pfs.h currently do 32 bit */
+    xnu_pf_patchset_t *patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+
+    size_t nkextranges = 0;
+    struct kextrange **kextranges = malloc(sizeof(struct kextrange *) * MAXKEXTRANGE);
+
+    for(int i=0; !PFS_END(g_all_pfs[i]); i++){
+        struct pf *pf = &g_all_pfs[i][g_kern_version_major - VERSION_BIAS];
+
+        if(IS_PF_UNUSED(pf))
+            continue;
+
+        const char *pf_kext = pf->pf_kext;
+        const char *pf_segment = pf->pf_segment;
+        const char *pf_section = pf->pf_section;
+
+        if(pf_kext){
+            add_kext_range(kextranges, pf_kext, pf_segment, pf_section,
+                    &nkextranges);
+        }
+
+        xnu_pf_maskmatch(patchset, (char *)pf->pf_name, pf->pf_matches,
+                pf->pf_masks, pf->pf_mmcount, false, pf->pf_callback);
+    }
+
+    xnu_pf_emit(patchset);
+
+    xnu_pf_range_t *__TEXT_EXEC = xnu_pf_segment(mh_execute_header, "__TEXT_EXEC");
+    xnu_pf_apply(__TEXT_EXEC, patchset);
+
+    for(size_t i=0; i<nkextranges; i++){
+        xnu_pf_range_t *range = kextranges[i]->range;
+        xnu_pf_apply(range, patchset);
+    }
+
+    xnu_pf_patchset_destroy(patchset);
+}
+
 static void
 kextload_patch() {
     /* iPhone 8 14.5.1, patches ml_static_protect %p < %p panic to
@@ -1092,113 +1017,32 @@ kextload_patch() {
     *p = 0x29470E82;
     p = ptr_for_sa(0xFFFFFFF007FBD198);
     *p = 0xd4200000;
+}
 
+static void anything_missing(void){
+    static bool printed_err_hdr = false;
 
-	xnu_pf_patchset_t *patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
+#define chk(expression, msg) \
+    do { \
+        if(expression){ \
+            if(!printed_err_hdr){ \
+                printf("KTRW: error(s) before\n" \
+                        "  we boot XNU:\n"); \
+                printed_err_hdr = true; \
+            } \
+            printf("  "msg); \
+        } \
+    } while (0) \
 
-	// Patch out KTRR MMU lockdown.
-	const uint32_t ktrr_mmu_count = 4;
-	/* uint64_t ktrr_mmu_match[ktrr_mmu_count] = { */
-	/* 	0xD51CF260,	// [0]  MSR  s3_4_c15_c2_3, Xn */
-	/* 	0x00000000,	// [1]  ? */
-	/* 	0xD51CF280,	// [2]  MSR  s3_4_c15_c2_4, Xn */
-	/* 	0x00000000,	// [3]  ? */
-	/* 	0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn */
-	/* }; */
-	/* uint64_t ktrr_mmu_mask[ktrr_mmu_count] = { */
-	/* 	0xFFFFFFE0,	// [0]  MSR */
-	/* 	0x00000000,	// [1]  ? */
-	/* 	0xFFFFFFE0,	// [2]  MSR */
-	/* 	0x00000000,	// [3]  ? */
-	/* 	0xFFFFFFE0,	// [4]  MSR */
-	/* }; */
+    chk(!g_IOSleep_addr, "IOSleep not found\n");
+    chk(!g_kernel_map_addr, "kernel_map not found\n");
+    chk(!g_kernel_thread_start_addr, "kernel_thread_start not found\n");
+    chk(!g_thread_deallocate_addr, "thread_deallocate not found\n");
+    chk(!g_panic_addr, "panic not found\n");
 
-    uint64_t ktrr_mmu_match[ktrr_mmu_count] = {
-        0xd51cf260,     /* msr s3_4_c15_c2_3, xn */
-        0xd51cf280,     /* msr s3_4_c15_c2_4, xn */
-        0x52800020,     /* mov (x|w)n, 1 */
-        0xd51cf240,     /* msr s3_4_c15_c2_2, xn */
-    };
-
-    uint64_t ktrr_mmu_mask[ktrr_mmu_count] = {
-        0xffffffe0,     /* ignore Rt */
-        0xffffffe0,     /* ignore Rt */
-        0x7fffffe0,     /* ignore Rd */
-        0xffffffe0,     /* ignore Rt */
-    };
-
-	xnu_pf_maskmatch(patchset, "KTRR patcher", ktrr_mmu_match,
-            ktrr_mmu_mask, ktrr_mmu_count, false, ktrr_mmu_patch);
-
-	// Patch out KTRR AMCC lockdown.
-	const uint32_t ktrr_amcc_count = 6;
-	/* uint64_t ktrr_amcc_match[ktrr_amcc_count] = { */
-	/* 	0xB907EC00,	// [0]  STR  Wn, [Xn,#0x7EC] */
-	/* 	0xD5033FDF,	// [1]  ISB */
-	/* 	0xD51CF260,	// [2]  MSR  s3_4_c15_c2_3, Xn */
-	/* 	0xD51CF280,	// [3]  MSR  s3_4_c15_c2_4, Xn */
-	/* 	0xD51CF240,	// [4]  MSR  s3_4_c15_c2_2, Xn */
-	/* }; */
-	/* uint64_t ktrr_amcc_mask[ktrr_amcc_count] = { */
-	/* 	0xFFFFFC00,	// [0]  STR */
-	/* 	0xFFFFFFFF,	// [1]  ISB */
-	/* 	0xFFFFFFE0,	// [2]  MSR */
-	/* 	0xFFFFFFE0,	// [3]  MSR */
-	/* 	0xFFFFFFE0,	// [4]  MSR */
-	/* }; */
-
-    /* XXX rename later */
-    uint64_t ktrr_amcc_match[ktrr_amcc_count] = {
-        0xb94001d1,     /* ldr w17, [x14] */
-        0x1b0f7e31,     /* mul x17, w17, w15 */
-        0x8b110210,     /* add x16, x16, x17 */
-        0x0,            /* ignore this instruction */
-        0x0,            /* ignore this instruction */
-        0xb8316a00,     /* str w0, [x16, x17] */
-    };
-
-    uint64_t ktrr_amcc_mask[ktrr_amcc_count] = {
-        0xffffffff,     /* match exactly */
-        0xffffffff,     /* match exactly */
-        0xffffffff,     /* match exactly */
-        0x0,            /* ignore this instruction */
-        0x0,            /* ignore this instruction */
-        0xffffffff,     /* match exactly */
-    };
-
-	xnu_pf_maskmatch(patchset, "CTRR patcher", ktrr_amcc_match,
-            ktrr_amcc_mask, ktrr_amcc_count, false, ctrr_patch);
-
-	// Patch the prologue of OSKext::initWithPrelinkedInfoDict() to set doCoalesedSlides to
-	// false. This enables the call to OSKext::setVMAttributes() later in the function on
-	// _PrelinkKASLROffsets kernelcaches, which is required to ensure that the kernel extension
-	// gets mapped with proper permissions.
-	const uint32_t OSKext_init_count = 6;
-	uint64_t OSKext_init_match[OSKext_init_count] = {
-		0xF9400000,	// [0]  LDR  Xn, [Xn]
-		0xF9400000,	// [1]  LDR  Xn, [Xn,#0xNNN]		;; 0xNNN < 0x200
-		0x90000001,	// [2]  ADRP X1, #0xNNN
-		0x91000021,	// [3]  ADD  X1, X1, #0xNNN		;; 0xNNN < 2^(12)
-		0xAA0003E0,	// [4]  MOV  X0, Xn
-		0xD63F0000,	// [5]  BLR  Xn
-	};
-	uint64_t OSKext_init_mask[OSKext_init_count] = {
-		0xFFFFFC00,	// [0]  LDR
-		0xFFFF0000,	// [1]  LDR
-		0x9F00001F,	// [2]  ADRP
-		0xFFC003FF,	// [3]  ADD
-		0xFFE0FFFF,	// [4]  MOV
-		0xFFFFFC1F,	// [5]  BLR
-	};
-	xnu_pf_maskmatch(patchset, "OSKext::initWithPrelinkedInfoDict patcher",
-            OSKext_init_match, OSKext_init_mask, OSKext_init_count,
-			false, OSKext_init_patch);
-
-	// Run the patchset to patch the kernel.
-	xnu_pf_emit(patchset);
-	xnu_pf_range_t *text_exec = xnu_pf_segment(xnu_header(), "__TEXT_EXEC");
-	xnu_pf_apply(text_exec, patchset);
-	xnu_pf_patchset_destroy(patchset);
+    /* If we printed the error header, something is missing */
+    if(printed_err_hdr)
+        ktrw_fatal_error();
 }
 
 // The pre-boot hook for loading kernel extensions.
@@ -1213,7 +1057,11 @@ kextload_preboot_hook() {
 		next_preboot_hook();
 	}
 #endif // DISABLE_CHECKRA1N_KERNEL_PATCHES
+    /* XXX No longer need kextload_patch since ktrwpf takes care
+     * of patchfinders, but it is here until I write patchfinders
+     * for the OSKext::slidePrelinkedExecutable vmaddr patch */
 	kextload_patch();
+    anything_missing();
 }
 
 // ---- Pongo module ------------------------------------------------------------------------------
@@ -1228,10 +1076,9 @@ module_entry() {
 	command_register("kextload",
 			"Load an XNU kernel extension at boot time",
 			command_kextload);
-	command_register("kernelcache-symbols",
-			"Load a symbol table for linking kernel extensions "
-			"against the kernelcache",
-			command_kernelcache_symbols);
+    command_register("ktrw-getkernelv", "Get iOS and do sep auto",
+            command_getkernelv);
+    command_register("ktrwpf", "Run patchfinder", command_ktrwpf);
 }
 
 const char *module_name = "kextload";
