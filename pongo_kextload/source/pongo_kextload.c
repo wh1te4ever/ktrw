@@ -98,7 +98,6 @@ static struct kcsym {
     { "_kernel_thread_start", &g_kernel_thread_start_addr },
     { "_ml_nofault_copy", &g_ml_nofault_copy_addr },
     { "_panic", &g_panic_addr },
-    { "_paniclog_append_noflush", &g_paniclog_append_noflush_addr },
     { "_thread_deallocate", &g_thread_deallocate_addr },
     { "_vsnprintf", &g_vsnprintf_addr },
 };
@@ -108,22 +107,15 @@ static const size_t g_nkcsyms = sizeof(g_kcsyms) / sizeof(*g_kcsyms);
 // Look up the static kernelcache address corresponding to the given named symbol.
 static uint64_t
 kernelcache_symbol_table_lookup(const char *symbol) {
-    printf("%s: resolving symbol '%s'\n", __func__, symbol);
-
     for(size_t i=0; i<g_nkcsyms; i++){
         if(strcmp(g_kcsyms[i].name, symbol) == 0){
-            printf("%s: got val: %#llx\n", __func__, *g_kcsyms[i].val);
-            return *g_kcsyms[i].val;
+            printf("%s: got val for '%s': %#llx [unslid %#llx]\n", __func__,
+                    symbol, *g_kcsyms[i].val, *g_kcsyms[i].val - kernel_slide);
+            /* This will be slid when the kext is linked */
+            return *g_kcsyms[i].val - kernel_slide;
         }
     }
-	/* const struct kernelcache_symbol_table *symbol_table = kernelcache_symbol_table; */
-	/* for (; symbol_table != NULL; symbol_table = symbol_table->next) { */
-	/* 	for (uint32_t i = 0; i < symbol_table->count; i++) { */
-	/* 		if (strcmp(symbol_table->symbol[i], symbol) == 0) { */
-	/* 			return symbol_table->address[i]; */
-	/* 		} */
-	/* 	} */
-	/* } */
+
 	return 0;
 }
 

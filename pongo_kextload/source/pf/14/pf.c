@@ -202,3 +202,115 @@ bool panic_finder_14(xnu_pf_patch_t *patch, void *cacheable_stream){
 
     return true;
 }
+
+bool const_boot_args_finder_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* I don't know where we landed but const_boot_args is the target
+     * of the ADRP/ADD one instruction down */
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *opcode_stream = cacheable_stream;
+
+    uint64_t const_boot_args = get_pc_rel_target(opcode_stream + 1);
+    g_const_boot_args_addr = xnu_ptr_to_va(const_boot_args);
+
+    puts("KTRW: found const_boot_args");
+
+    return true;
+}
+
+bool _disable_enable_preemption_finder_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* We may have landed inside _disable_preemption. The only way
+     * we can tell is if there's a clrex #0xf less than ten instructions up,
+     * so look for that. */
+    uint32_t *opcode_stream = cacheable_stream;
+    uint32_t instr_limit = 10;
+
+    while(*opcode_stream != 0xd5033f5f){
+        if(instr_limit-- == 0)
+            return false;
+
+        opcode_stream--;
+    }
+
+    xnu_pf_disable_patch(patch);
+
+    instr_limit = 10;
+
+    /* The clrex #0xf is there, go forward for the start of
+     * _disable_preemption. Looking for stp x29, x30, [sp, #-0x10]! */
+    while(*opcode_stream != 0xa9bf7bfd){
+        if(instr_limit-- == 0)
+            return false;
+
+        opcode_stream++;
+    }
+
+    g__disable_preemption_addr = xnu_ptr_to_va(opcode_stream);
+
+    /* _enable_preemption is right under _disable_preemption, so
+     * we grab that also */
+    instr_limit = 25;
+
+    /* The clrex #0xf is there, go forward for the start of
+     * _disable_preemption. Looking for stp x29, x30, [sp, #-0x10]! */
+    while(*opcode_stream != 0xa9bf7bfd){
+        if(instr_limit-- == 0)
+            return false;
+
+        opcode_stream++;
+    }
+
+    g__enable_preemption_addr = xnu_ptr_to_va(opcode_stream);
+
+    puts("KTRW: found _disable_preemption");
+    puts("KTRW: found _enable_preemption");
+
+    return true;
+}
+
+bool vsnprintf_finder_14(xnu_pf_patch_t *patch, void *cacheable_stream){
+    /* We landed in vsnprintf, find its prolouge. Searching for
+     * sub sp, sp, n */
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *opcode_stream = cacheable_stream;
+    uint32_t instr_limit = 50;
+
+    while((*opcode_stream & 0xffc003ff) != 0xd10003ff){
+        if(instr_limit-- == 0)
+            return false;
+
+        opcode_stream--;
+    }
+
+    g_vsnprintf_addr = xnu_ptr_to_va(opcode_stream);
+
+    puts("KTRW: found vsnprintf");
+
+    return true;
+}
+
+bool ml_nofault_copy_finder_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* We landed inside ml_nofault_copy so we need to find its
+     * prologue. Searching for stp x28, x27, [sp, #-0x60]! */
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *opcode_stream = cacheable_stream;
+    uint32_t instr_limit = 200;
+
+    while(*opcode_stream != 0xa9ba6ffc){
+        if(instr_limit-- == 0)
+            return false;
+
+        opcode_stream--;
+    }
+
+    g_ml_nofault_copy_addr = xnu_ptr_to_va(opcode_stream);
+
+    puts("KTRW: found ml_nofault_copy");
+
+    return true;
+}

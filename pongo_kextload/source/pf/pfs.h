@@ -158,6 +158,73 @@ struct pf g_all_pfs[MAXPF][NUM_SUPPORTED_VERSIONS] = {
             }),
             6, panic_finder_14, "__TEXT_EXEC"),
     },
+    {
+        PF_DECL32("const_boot_args finder iOS 14",
+            LISTIZE({
+                0xd500419f,     /* msr PAN, #1 */
+                0x10000001,     /* adrp x1, n or adr x1, n */
+                0x0,            /* ignore this instruction */
+                0xaa1303e0,     /* mov x0, x19 */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0x1f00001f,     /* ignore immediate */
+                0x0,            /* ignore this instruction */
+                0xffffffff,     /* match exactly */
+            }),
+            4, const_boot_args_finder_14, "__TEXT_EXEC"),
+
+    },
+    {
+        PF_DECL32("_disable_preemption/_enable_preemption finder iOS 14",
+            LISTIZE({
+                0x910003fd,     /* mov x29, sp */
+                0xd538d088,     /* mrs x8, tpidr_el1 */
+                0xb9400109,     /* ldr w9, [x8, n] */
+                0x31000529,     /* adds w9, w9, #1 */
+                0x54000002,     /* b.cs n */
+                0xb9000109,     /* str w9, [x8, n] */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffc003ff,     /* ignore immediate */
+                0xffffffff,     /* match exactly */
+                0xff00001f,     /* ignore immediate */
+                0xffc003ff,     /* ignore immediate */
+            }),
+            6, _disable_enable_preemption_finder_14, "__TEXT_EXEC"),
+    },
+    {
+        PF_DECL32("vsnprintf finder iOS 14",
+            LISTIZE({
+                0xaa0303e8,     /* mov x8, x3 */
+                0xaa0203e9,     /* mov x9, x2 */
+                0xa90007e0,     /* stp x0, x1, [sp] */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+            }),
+            3, vsnprintf_finder_14, "__TEXT_EXEC"),
+    },
+    {
+        PF_DECL32("ml_nofault_copy finder iOS 14",
+            LISTIZE({
+                0x8b130313,     /* add x19, x24, x19 */
+                0x8b160316,     /* add x22, x24, x22 */
+                0x8b150315,     /* add x21, x24, x21 */
+                0xeb180294,     /* subs x20, x20, x24 */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+            }),
+            4, ml_nofault_copy_finder_14, "__TEXT_EXEC"),
+    },
     { PF_END, },
 };
 
