@@ -916,7 +916,7 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 
     printf("%s: patchfinder...\n", __func__);
     pongo_usb_send_command(pongo, "ktrwpf\n", 0);
-    sleep(1);
+    sleep(2);
 
 	// Set boot arguments to "-v". This clears the ramdisk and enables verbose boot.
 	pongo_usb_send_command(pongo, "xargs -v\n", 0);

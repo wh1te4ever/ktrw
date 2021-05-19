@@ -76,6 +76,7 @@ uint64_t g_kernel_map_addr = 0;
 uint64_t g_kernel_memory_allocate_addr = 0;
 uint64_t g_kernel_thread_start_addr = 0;
 uint64_t g_ml_nofault_copy_addr = 0;
+uint64_t g_paniclog_append_noflush_addr = 0;
 uint64_t g_panic_addr = 0;
 uint64_t g_thread_deallocate_addr = 0;
 uint64_t g_vsnprintf_addr = 0;
@@ -98,6 +99,7 @@ static struct kcsym {
     { "_kernel_memory_allocate", &g_kernel_memory_allocate_addr },
     { "_kernel_thread_start", &g_kernel_thread_start_addr },
     { "_ml_nofault_copy", &g_ml_nofault_copy_addr },
+    { "_paniclog_append_noflush", &g_paniclog_append_noflush_addr },
     { "_panic", &g_panic_addr },
     { "_thread_deallocate", &g_thread_deallocate_addr },
     { "_vsnprintf", &g_vsnprintf_addr },
@@ -990,6 +992,7 @@ static void anything_missing(void){
     chk(!g_kernel_memory_allocate_addr, "kernel_memory_allocate not found\n");
     chk(!g_kernel_thread_start_addr, "kernel_thread_start not found\n");
     chk(!g_ml_nofault_copy_addr, "ml_nofault_copy not found\n");
+    chk(!g_paniclog_append_noflush_addr, "paniclog_append_noflush not found\n");
     chk(!g_panic_addr, "panic not found\n");
     chk(!g_thread_deallocate_addr, "thread_deallocate not found\n");
     chk(!g_vsnprintf_addr, "vsnprintf not found\n");

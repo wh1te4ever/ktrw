@@ -331,6 +331,29 @@ bool kernel_memory_allocate_finder_14(xnu_pf_patch_t *patch,
     return true;
 }
 
+bool paniclog_append_noflush_finder_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    uint32_t *opcode_stream = cacheable_stream;
+
+	void *target = RESOLVE_ADRP_ADD(opcode_stream + 2);
+
+    if(!target)
+        return false;
+
+    if(strcmp(target, "\nPlease go to https://panic.apple.com to report this panic\n"))
+        return false;
+
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *paniclog_append_noflush = get_branch_dst_ptr(opcode_stream + 3);
+
+    g_paniclog_append_noflush_addr = xnu_ptr_to_va(paniclog_append_noflush);
+
+    puts("KTRW: found paniclog_append_noflush");
+
+    return true;
+}
+
 bool OSKext_slidePrelinkedExecutable_patcher_14(xnu_pf_patch_t *patch,
         void *cacheable_stream){
     /* The STR we matched zeroes vmaddr of all the segments in the

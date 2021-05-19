@@ -17,6 +17,7 @@ bool _disable_enable_preemption_finder_14(xnu_pf_patch_t *, void *);
 bool vsnprintf_finder_14(xnu_pf_patch_t *, void *);
 bool ml_nofault_copy_finder_14(xnu_pf_patch_t *, void *);
 bool kernel_memory_allocate_finder_14(xnu_pf_patch_t *, void *);
+bool paniclog_append_noflush_finder_14(xnu_pf_patch_t *, void *);
 bool OSKext_slidePrelinkedExecutable_patcher_14(xnu_pf_patch_t *, void *);
 
 #endif

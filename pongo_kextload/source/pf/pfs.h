@@ -241,6 +241,26 @@ struct pf g_all_pfs[MAXPF][NUM_SUPPORTED_VERSIONS] = {
             4, kernel_memory_allocate_finder_14, "__TEXT_EXEC"),
     },
     {
+        PF_DECL32("paniclog_append_noflush finder iOS 14",
+            LISTIZE({
+                0xa9bf7bfd,     /* stp x29, x30, [sp, #-0x10]! */
+                0x910003fd,     /* mov x29, sp */
+                0x10000000,     /* adrp x0, n or adr x0, n */
+                0x0,            /* ignore this instruction */
+                0x94000000,     /* bl n */
+                0x14000000,     /* b n */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0x1f00001f,     /* ignore immediate */
+                0x0,            /* ignore this instruction */
+                0xfc000000,     /* ignore immediate */
+                0xfc000000,     /* ignore immediate */
+            }),
+            6, paniclog_append_noflush_finder_14, "__TEXT_EXEC"),
+    },
+    {
         PF_DECL32("OSKext::slidePrelinkedExecutable patcher iOS 14",
             LISTIZE({
                 0xfa5030c0,     /* ccmp x6, x16, #0, cc */

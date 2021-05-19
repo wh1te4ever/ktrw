@@ -1334,8 +1334,6 @@ KMOD_DECL(ktrw, KTRW_VERSION)
 
 static int
 ktrw_module_start(struct kmod_info *kmod, void *data) {
-    /* asm volatile("brk 0x4141"); */
-    /* panic("%s: here\n", __func__); */
 	thread_t thread;
 	int kr = kernel_thread_start(gdb_stub_thread, NULL, &thread);
 	if (kr != 0) {
