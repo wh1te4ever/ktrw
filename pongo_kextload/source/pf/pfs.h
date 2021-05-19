@@ -173,7 +173,6 @@ struct pf g_all_pfs[MAXPF][NUM_SUPPORTED_VERSIONS] = {
                 0xffffffff,     /* match exactly */
             }),
             4, const_boot_args_finder_14, "__TEXT_EXEC"),
-
     },
     {
         PF_DECL32("_disable_preemption/_enable_preemption finder iOS 14",
@@ -224,6 +223,36 @@ struct pf g_all_pfs[MAXPF][NUM_SUPPORTED_VERSIONS] = {
                 0xffffffff,     /* match exactly */
             }),
             4, ml_nofault_copy_finder_14, "__TEXT_EXEC"),
+    },
+    {
+        PF_DECL32("kernel_memory_allocate finder iOS 14",
+            LISTIZE({
+                0xaa0303e5,     /* mov x5, x3 */
+                0xd2800003,     /* mov x3, #0 */
+                0x52800084,     /* mov w4, #4 */
+                0x14000000,     /* b n */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xfc000000,     /* ignore immediate */
+            }),
+            4, kernel_memory_allocate_finder_14, "__TEXT_EXEC"),
+    },
+    {
+        PF_DECL32("OSKext::slidePrelinkedExecutable patcher iOS 14",
+            LISTIZE({
+                0xfa5030c0,     /* ccmp x6, x16, #0, cc */
+                0x9a9f20c6,     /* csel x6, x6, xzr, cs */
+                0xf9000dc6,     /* str x6, [x14, #0x18] */
+            }),
+            LISTIZE({
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+                0xffffffff,     /* match exactly */
+            }),
+            3, OSKext_slidePrelinkedExecutable_patcher_14, "__TEXT_EXEC"),
     },
     { PF_END, },
 };

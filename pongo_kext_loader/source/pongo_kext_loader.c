@@ -901,7 +901,6 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 		return false;
 	}
     printf("%s: uploading module...\n", __func__);
-    sleep(1);
 
 	// Upload the kextload pongoOS module.
 	pongo_usb_init_bulk_upload(pongo);
@@ -909,7 +908,6 @@ pongo_kext_load_init(pongo_usb_device pongo) {
 	pongo_usb_send_command(pongo, "modload\n", 0);
 	// Unmap the module.
 	unmap_file(kextload_module, kextload_module_size);
-
     sleep(1);
 
     printf("%s: ktrw-getkernelv...\n", __func__);

@@ -22,7 +22,7 @@ bool OSKext_init_patcher_14(xnu_pf_patch_t *patch, void *cacheable_stream) {
 	if (strcmp(target, "_PrelinkBundlePath") != 0) {
 		return false;
 	}
-	puts("Patching OSKext::initWithPrelinkedInfoDict()");
+	/* puts("Patching OSKext::initWithPrelinkedInfoDict()"); */
 	// Search backwards until we get the prologue. Record the instruction that MOVs from X2.
 	uint32_t *x2_insn = NULL;
 	for (int i = 0;; i--) {
@@ -271,8 +271,8 @@ bool _disable_enable_preemption_finder_14(xnu_pf_patch_t *patch,
 }
 
 bool vsnprintf_finder_14(xnu_pf_patch_t *patch, void *cacheable_stream){
-    /* We landed in vsnprintf, find its prolouge. Searching for
-     * sub sp, sp, n */
+    /* We landed in vsnprintf so we need to find its prolouge. Searching
+     * for sub sp, sp, n */
     xnu_pf_disable_patch(patch);
 
     uint32_t *opcode_stream = cacheable_stream;
@@ -311,6 +311,38 @@ bool ml_nofault_copy_finder_14(xnu_pf_patch_t *patch,
     g_ml_nofault_copy_addr = xnu_ptr_to_va(opcode_stream);
 
     puts("KTRW: found ml_nofault_copy");
+
+    return true;
+}
+
+bool kernel_memory_allocate_finder_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* kernel_memory_allocate is the dst of the branch three
+     * instructions down */
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *opcode_stream = cacheable_stream;
+    uint32_t *kernel_memory_allocate = get_branch_dst_ptr(opcode_stream + 3);
+
+    g_kernel_memory_allocate_addr = xnu_ptr_to_va(kernel_memory_allocate);
+
+    puts("KTRW: found kernel_memory_allocate");
+
+    return true;
+}
+
+bool OSKext_slidePrelinkedExecutable_patcher_14(xnu_pf_patch_t *patch,
+        void *cacheable_stream){
+    /* The STR we matched zeroes vmaddr of all the segments in the
+     * KTRW kext and I don't know why, but patching it out works */
+    xnu_pf_disable_patch(patch);
+
+    uint32_t *opcode_stream = cacheable_stream;
+    opcode_stream[2] = 0xd503201f;
+
+    g_did_patch_slidePrelinkedExecutable = true;
+
+    puts("KTRW: patched OSKext::slidePrelinkedExecutable");
 
     return true;
 }

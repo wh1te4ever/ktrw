@@ -28,14 +28,6 @@ I suspect the last two are a result of me not understanding some changes made
 to the XNU kext loading code, but as asm patches they work fine so I don't
 see the need to spend more time on that.
 
-Right now things are hardcoded for the iPhone 8 running iOS 14.5.1. I plan
-to write patchfinders for the offsets you'd normally put in a text file
-inside the kernel_symbols directory (will be finished by 5/24)
-
-Patchfinder TODO:
-- kernel_memory_allocate
-- OSKext::slidePrelinkedExecutable patch so it doesn't zero vmaddr inside the KTRW kext segments
-
 Bypassing KTRR
 ---------------------------------------------------------------------------------------------------
 

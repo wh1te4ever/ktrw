@@ -77,9 +77,10 @@ uint64_t g_kernel_memory_allocate_addr = 0;
 uint64_t g_kernel_thread_start_addr = 0;
 uint64_t g_ml_nofault_copy_addr = 0;
 uint64_t g_panic_addr = 0;
-uint64_t g_paniclog_append_noflush_addr = 0;
 uint64_t g_thread_deallocate_addr = 0;
 uint64_t g_vsnprintf_addr = 0;
+
+bool g_did_patch_slidePrelinkedExecutable = false;
 
 /* Constants */
 static uint64_t g_mhaddr = 0xfffffff007004000;
@@ -109,8 +110,8 @@ static uint64_t
 kernelcache_symbol_table_lookup(const char *symbol) {
     for(size_t i=0; i<g_nkcsyms; i++){
         if(strcmp(g_kcsyms[i].name, symbol) == 0){
-            printf("%s: got val for '%s': %#llx [unslid %#llx]\n", __func__,
-                    symbol, *g_kcsyms[i].val, *g_kcsyms[i].val - kernel_slide);
+            /* printf("%s: got val for '%s': %#llx [unslid %#llx]\n", __func__, */
+            /*         symbol, *g_kcsyms[i].val, *g_kcsyms[i].val - kernel_slide); */
             /* This will be slid when the kext is linked */
             return *g_kcsyms[i].val - kernel_slide;
         }
@@ -481,23 +482,13 @@ kext_map(struct kext_load_info *info) {
 	// Update virtual addresses in the load commands, in particular, LC_SEGMENT_64, to the
 	// corresponding kernelcache static addresses.
 	mh = info->kext;
-    /* printf("%s: kext @ %#llx (unslid %#llx)\n", __func__, mh, (uintptr_t)mh-kernel_slide); */
 	lc = (void *) (mh + 1);
 	for (uint32_t cmd_idx = 0; cmd_idx < mh->ncmds; cmd_idx++) {
 		if (lc->cmd == LC_SEGMENT_64) {
 			struct segment_command_64 *sc = (void *) lc;
 			sc->vmaddr = sc->vmaddr - info->vm_base + sa_for_ptr(info->kext);
+            /* XXX: Needed on 14.x */
             sc->vmaddr += kernel_slide;
-            printf("%s: set %s's segment vmaddr to %p (slid %p)\n", __func__,
-                    sc->segname, sc->vmaddr, sc->vmaddr + kernel_slide);
-            /* if(cmd_idx == 4){ */
-                /* sc->maxprot = VM_PROT_WRITE | VM_PROT_EXECUTE; */
-                /* sc->initprot = VM_PROT_WRITE | VM_PROT_EXECUTE; */
-                /* sc->maxprot = 0x40+cmd_idx; */
-                /* sc->initprot = 0x40+cmd_idx; */
-            /* } */
-            /* sc->vmaddr = 0x41414141; */
-            /* sc->vmsize = 0x128000; */
 			// TODO: Update sections. This is not strictly needed by XNU.
 		}
 		lc = (void *) ((uintptr_t) lc + lc->cmdsize);
@@ -976,41 +967,6 @@ static void command_ktrwpf(const char *cmd, char *args){
     xnu_pf_patchset_destroy(patchset);
 }
 
-static void
-kextload_patch() {
-    /* iPhone 8 14.5.1, patches ml_static_protect %p < %p panic to
-     * a BRK so I can see registers */
-    uint32_t *ml_static_protect_panic = ptr_for_sa(0xFFFFFFF007BAB5F4);
-    *ml_static_protect_panic = 0xd4200000;
-    /* iPhone 8 14.5.1, patches OSKext::slidePrelinkedExecutable to
-     * not zero vmaddr */
-    uint32_t *p = ptr_for_sa(0xFFFFFFF007FBB18C);
-    *p = 0xD503201F;
-
-    /* iPhone 8 14.5.1 - redirect OSKextLog messages to IOLog */
-    /* p = ptr_for_sa(0xFFFFFFF007FC2194); */
-    /* mov x0, x2 */
-    /* *p = 0xAA0203E0; */
-    /* p = ptr_for_sa(0xFFFFFFF007FC2198); */
-    /* b _IOLog */
-    /* *p = 0x140102dd; */
-
-    /* iPhone 8 14.5.1 - doprnt_hide_pointers patch */
-    p = ptr_for_sa(0xFFFFFFF00923059C);
-    *p = 0;
-
-    /* iPhone 8 14.5.1 - panic instead of printing error message about
-     * some page %p not being backed by physical memory */
-    p = ptr_for_sa(0xFFFFFFF007FBD190);
-    /* ldp x0, x1, [x20, #0x18] so I can see vmaddr and vmsize in x0&x1 */
-    *p = 0xA9418680;
-    p = ptr_for_sa(0xFFFFFFF007FBD194);
-    /* ldp w2, w3, [x20, #0x38] so I can see maxprot and initprot in x2 and x3 */
-    *p = 0x29470E82;
-    p = ptr_for_sa(0xFFFFFFF007FBD198);
-    *p = 0xd4200000;
-}
-
 static void anything_missing(void){
     static bool printed_err_hdr = false;
 
@@ -1026,11 +982,19 @@ static void anything_missing(void){
         } \
     } while (0) \
 
+    chk(!g__disable_preemption_addr, "_disable_preemption not found\n");
+    chk(!g__enable_preemption_addr, "_enable_preemption not found\n");
+    chk(!g_const_boot_args_addr, "const_boot_args not found\n");
     chk(!g_IOSleep_addr, "IOSleep not found\n");
     chk(!g_kernel_map_addr, "kernel_map not found\n");
+    chk(!g_kernel_memory_allocate_addr, "kernel_memory_allocate not found\n");
     chk(!g_kernel_thread_start_addr, "kernel_thread_start not found\n");
-    chk(!g_thread_deallocate_addr, "thread_deallocate not found\n");
+    chk(!g_ml_nofault_copy_addr, "ml_nofault_copy not found\n");
     chk(!g_panic_addr, "panic not found\n");
+    chk(!g_thread_deallocate_addr, "thread_deallocate not found\n");
+    chk(!g_vsnprintf_addr, "vsnprintf not found\n");
+    chk(!g_did_patch_slidePrelinkedExecutable, "did not patch\n"
+            "OSKext::slidePrelinkedExecutable\n");
 
     /* If we printed the error header, something is missing */
     if(printed_err_hdr)
@@ -1049,10 +1013,6 @@ kextload_preboot_hook() {
 		next_preboot_hook();
 	}
 #endif // DISABLE_CHECKRA1N_KERNEL_PATCHES
-    /* XXX No longer need kextload_patch since ktrwpf takes care
-     * of patchfinders, but it is here until I write patchfinders
-     * for the OSKext::slidePrelinkedExecutable vmaddr patch */
-	kextload_patch();
     anything_missing();
 }
 

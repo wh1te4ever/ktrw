@@ -12,12 +12,11 @@ CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
 
 CFLAGS  =  -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource/third_party
-# CFLAGS += -O2
+CFLAGS += -O2
 CFLAGS += -Wall -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion
 
 LDFLAGS  = -Xlinker -kext -nostdlib -Xlinker -fatal_warnings
 
-# TODO: add pf stuff
 SOURCES = source/asm.c \
 		  source/common.c \
 		  source/pongo_kextload.c \
