@@ -22,6 +22,7 @@ void ktrw_fatal_error(void);
 uintmax_t bits(uintmax_t, unsigned, unsigned, unsigned, unsigned);
 bool MATCH(uint32_t, uint32_t, uint32_t);
 void *RESOLVE_ADRP_ADD(uint32_t *);
+void *RESOLVE_ADR(uint32_t *);
 int atoi(const char *);
 
 

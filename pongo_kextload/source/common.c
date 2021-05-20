@@ -53,6 +53,18 @@ void *RESOLVE_ADRP_ADD(uint32_t *insn) {
 	return ptr_for_va(target);
 }
 
+void *RESOLVE_ADR(uint32_t *insn) {
+	uint32_t adr = *insn;
+	// Disallow sp
+	if (bits(adr, 0, 4, 0, 0) == 0x1f) {
+		return NULL;
+	}
+	uint64_t pc = va_for_ptr(insn);
+	uint64_t imm0 = bits(adr, 1, 23, 5, 2) | bits(adr, 0, 30, 29, 0);
+	uint64_t target = pc + imm0;
+	return ptr_for_va(target);
+}
+
 /* no sign support */
 int atoi(const char *s){
     int res = 0;

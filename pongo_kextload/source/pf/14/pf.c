@@ -336,6 +336,7 @@ bool paniclog_append_noflush_finder_14(xnu_pf_patch_t *patch,
     uint32_t *opcode_stream = cacheable_stream;
 
 	void *target = RESOLVE_ADRP_ADD(opcode_stream + 2);
+    target = target ? target : RESOLVE_ADR(opcode_stream + 2);
 
     if(!target)
         return false;
