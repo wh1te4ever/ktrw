@@ -31,7 +31,7 @@
 
 // ---- Configuration -----------------------------------------------------------------------------
 
-#define DISABLE_CHECKRA1N_KERNEL_PATCHES 1
+#define DISABLE_CHECKRA1N_KERNEL_PATCHES 0
 
 // ---- Standard functions ------------------------------------------------------------------------
 
