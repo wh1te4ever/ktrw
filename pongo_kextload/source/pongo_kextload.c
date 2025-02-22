@@ -967,6 +967,8 @@ static void command_ktrwpf(const char *cmd, char *args){
     }
 
     xnu_pf_patchset_destroy(patchset);
+
+	g_mhaddr = va_for_sa(g_mhaddr);
 }
 
 static void anything_missing(void){
