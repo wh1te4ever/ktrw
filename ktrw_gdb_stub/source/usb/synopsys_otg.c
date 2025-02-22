@@ -17,11 +17,11 @@
 // limitations under the License.
 //
 
-#include "usb/usb.h"
+#include "usb.h"
 
-#include "page_table.h"
+#include "../page_table.h"
 
-#include "primitives.h"
+#include "../primitives.h"
 
 //
 // The Synopsys DesignWare Hi-Speed USB 2.0 On-the-Go Controller USB stack
@@ -518,7 +518,7 @@ struct _reg { uint32_t off; };
 #define SYNOPSYS_OTG_REGISTER(_x)	((struct _reg) { _x })
 
 // Include the registers.
-#include "usb/synopsys_otg_regs.h"
+#include "synopsys_otg_regs.h"
 
 // This is the physical base address of the Synopsys DWC USB 2.0 OTG registers.
 // TODO: Get this value from the device tree.

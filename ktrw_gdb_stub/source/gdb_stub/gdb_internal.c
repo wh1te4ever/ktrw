@@ -22,7 +22,7 @@
 #include <stdarg.h>
 
 #include "gdb_rsp.h"
-#include "kernel_extern.h"
+#include "../kernel_extern.h"
 
 // ---- Kernel symbols ----------------------------------------------------------------------------
 
