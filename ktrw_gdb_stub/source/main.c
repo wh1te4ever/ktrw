@@ -17,8 +17,10 @@
 // limitations under the License.
 //
 
+
 #include "gdb_stub/gdb_stub.h"
 
+#include "third_party/boot_args.h"
 #include "debug.h"
 #include "devicetree.h"
 #include "jit_heap.h"
@@ -26,9 +28,6 @@
 #include "page_table.h"
 #include "usb/usb.h"
 #include "watchdog.h"
-
-#include "third_party/boot_args.h"
-#include "third_party/kmod.h"
 
 // ---- Kernel symbols ----------------------------------------------------------------------------
 
@@ -45,7 +44,6 @@ KERNEL_EXTERN int kernel_memory_allocate(void *map, void **address, size_t size,
 KERNEL_EXTERN int kernel_thread_start(thread_continue_t continuation, void *parameter, thread_t *thread);
 KERNEL_EXTERN size_t ml_nofault_copy(const void *vsrc, void *vdst, size_t size);
 KERNEL_EXTERN void thread_deallocate(thread_t thread);
-KERNEL_EXTERN void panic(const char *str, ...);
 
 // ---- CPU debugging -----------------------------------------------------------------------------
 
@@ -93,28 +91,12 @@ debug_cpu_restart(int cpu_id) {
 }
 
 static void
-debug_cpu_disable_reset(int cpu_id) {
-	uint64_t dbgwrap = rDBGWRAP(cpu_id);
-	rDBGWRAP(cpu_id) = dbgwrap | DBGWRAP_DisableReset;
-}
-
-static void
 debug_cpu_wait_for_halt(int cpu_id) {
-	// Wait for the halt to show up in DBGWRAP.
 	for (;;) {
 		if (rDBGWRAP(cpu_id) & DBGWRAP_CpuIsHalted) {
 			break;
 		}
 	}
-	// Wait for the halt to show up in EDPRSR. This shouldn't be necessary but it's helpful to
-	// know that both registers agree.
-	for (;;) {
-		if (rEDPRSR(cpu_id) & EDPRSR_HALTED) {
-			break;
-		}
-	}
-	// Unlock the OS Lock to enable debug access.
-	rOSLAR(cpu_id) = 0;
 }
 
 static void
@@ -995,17 +977,10 @@ prepare_cpus_for_debugging() {
 			rEDLAR(cpu_id) = 0xC5ACCE55;
 		}
 	}
+	// Halt all CPUs. Ensure that this is done safely to minimize the chance of panicking the
+	// system.
 	for (int cpu_id = 0; cpu_id < CPU_COUNT; cpu_id++) {
 		if (valid_cpu_id(cpu_id)) {
-			while (rEDLSR(cpu_id) & EDLSR_SLK) {}
-		}
-	}
-	// Halt all CPUs. We use the interrupt-safe halt routine to minimize the chance of
-	// panicking the system. Also, set EDPRCR.CORENPDRQ to prevent the core power domain from
-	// powering down.
-	for (int cpu_id = 0; cpu_id < CPU_COUNT; cpu_id++) {
-		if (valid_cpu_id(cpu_id)) {
-			debug_cpu_disable_reset(cpu_id);
 			try_interrupt_safe_halt(cpu_id);
 		}
 	}
@@ -1055,7 +1030,9 @@ prepare_cpus_for_debugging() {
 			// Set EDSCR.TDA so that a halting debug event is generated if the core
 			// tries to access DBGBCR<n>_EL1, DBGBVR<n>_EL1, DBGWCR<n>_EL1, or
 			// DBGWVR<n>_EL1.
-			edscr |= EDSCR_TDA;
+			// TODO: Enable this after we implement handling for software access
+			// exceptions.
+			//edscr |= EDSCR_TDA;
 			// Set EDSCR.HDE to enable halting for breakpoints, watchpoints, and halt
 			// instructions.
 			edscr |= EDSCR_HDE;
@@ -1107,30 +1084,6 @@ handle_step(int cpu_id) {
 	gdb_stub_did_step(cpu_id);
 }
 
-// Handle a CPU halt due to an attempt to access the debug registers. Unlike with breakpoints,
-// watchpoints, and single-step, this is an internal event that we simply need to fix up on this
-// one CPU.
-static void
-handle_software_debug_access(int cpu_id) {
-	// Read X0.
-	debug_cpu_execute_instruction(cpu_id, 0xD5130400); // MSR DBGDTR_EL0, X0
-	uint64_t x0 = debug_cpu_read_dtr(cpu_id);
-	// Read PC.
-	debug_cpu_execute_instruction(cpu_id, 0xD53B4520); // MRS X0, DLR_EL0
-	debug_cpu_execute_instruction(cpu_id, 0xD5130400); // MSR DBGDTR_EL0, X0
-	uint64_t pc = debug_cpu_read_dtr(cpu_id);
-	// TODO: Process the instruction rather than just skipping it!
-	// Set PC = PC + 4.
-	debug_cpu_write_dtr(cpu_id, pc + 4);
-	debug_cpu_execute_instruction(cpu_id, 0xD5330400); // MRS X0, DBGDTR_EL0
-	debug_cpu_execute_instruction(cpu_id, 0xD51B4520); // MSR DLR_EL0, X0
-	// Restore X0.
-	debug_cpu_write_dtr(cpu_id, x0);
-	debug_cpu_execute_instruction(cpu_id, 0xD5330400); // MRS X0, DBGDTR_EL0
-	// Resume the CPU after the offending instruction.
-	debug_cpu_restart(cpu_id);
-}
-
 // Handle a CPU halt for any other reason (likely because gdb_stub_interrupt_cpu() was called).
 static bool
 handle_halt(int cpu_id) {
@@ -1166,8 +1119,6 @@ check_cpu(int cpu_id) {
 	if (!newly_halted) {
 		return;
 	}
-	// Since we're newly halted, unlock the OS Lock to enable debug access.
-	rOSLAR(cpu_id) = 0;
 	// Now we need to check EDSCR so that we can report the reason for the exception.
 	uint32_t edscr = rEDSCR(cpu_id);
 	// The bits we care about are EDSCR.STATUS, which contain the debug status.
@@ -1193,12 +1144,10 @@ check_cpu(int cpu_id) {
 			break;
 		case 0b100011:	// OS Unlock Catch.
 		case 0b100111:	// Reset Catch.
+		case 0b110011:	// Software access to debug register.
 		case 0b110111:	// Exception Catch.
 			// If we observe this state we should silently continue.
 			debug_cpu_restart(cpu_id);
-			break;
-		case 0b110011:	// Software access to debug register.
-			handle_software_debug_access(cpu_id);
 			break;
 		case 0b010011:	// External debug request.
 		case 0b101111:	// HLT instruction.
@@ -1236,22 +1185,15 @@ check_cpus() {
 // A thread function wrapper around gdb_stub_main().
 static void
 gdb_stub_thread(void *parameter, int wait_result) {
-	// Sleep for a few seconds (the exact amount is configured during build, but defaults to 30
-	// seconds) to allow the system to start up.
-	if (KTRW_GDB_STUB_ACTIVATION_DELAY > 0) {
-		IOSleep(KTRW_GDB_STUB_ACTIVATION_DELAY * 1000);
-	}
 	// Parse the device tree for basic system configuration.
 	bool ok = parse_devicetree_info();
 	if (!ok) {
-		panic("Could not parse devicetree");
 		return;
 	}
 	// Allocate device memory for the USB stack.
 	void *usb_dma_page = NULL;
 	kernel_memory_allocate(kernel_map, &usb_dma_page, PAGE_SIZE, PAGE_SIZE - 1, 0x8, 99);
 	if (usb_dma_page == NULL) {
-		panic("Could not allocate USB DMA memory");
 		return;
 	}
 	// Allocate normal memory for the USB stack.
@@ -1259,7 +1201,6 @@ gdb_stub_thread(void *parameter, int wait_result) {
 	kernel_memory_allocate(kernel_map, &usb_memory, USB_STACK_MEMORY_SIZE,
 			PAGE_SIZE - 1, 0, 99);
 	if (usb_memory == NULL) {
-		panic("Could not allocate USB stack memory");
 		return;
 	}
 	// Initialize early state for the USB stack.
@@ -1268,7 +1209,6 @@ gdb_stub_thread(void *parameter, int wait_result) {
 	void *jit_heap = NULL;
 	kernel_memory_allocate(kernel_map, &jit_heap, JIT_HEAP_SIZE, PAGE_SIZE - 1, 0, 99);
 	if (jit_heap == NULL) {
-		panic("Could not allocate JIT heap memory");
 		return;
 	}
 	// Initialize the JIT heap.
@@ -1330,10 +1270,8 @@ gdb_stub_thread(void *parameter, int wait_result) {
 
 // ---- Entry -------------------------------------------------------------------------------------
 
-KMOD_DECL(ktrw, KTRW_VERSION)
-
-static int
-ktrw_module_start(struct kmod_info *kmod, void *data) {
+uint32_t
+_kext_start(uint64_t value) {
 	thread_t thread;
 	int kr = kernel_thread_start(gdb_stub_thread, NULL, &thread);
 	if (kr != 0) {
@@ -1341,10 +1279,4 @@ ktrw_module_start(struct kmod_info *kmod, void *data) {
 	}
 	thread_deallocate(thread);
 	return 0;
-}
-
-static int
-ktrw_module_stop(struct kmod_info *kmod, void *data) {
-	// No stopping KTRW.
-	return 1;
 }

@@ -27,9 +27,7 @@
  * gdb_process_packet
  *
  * Description:
- * 	Handle a GDB RSP packet and send any replies. The supplied data buffer is used both for
- * 	parsing the request and building the reply, so it must be of capacity
- * 	GDB_RSP_MAX_PACKET_SIZE.
+ * 	Handle a GDB RSP packet and send any replies.
  */
 void gdb_process_packet(void *data, size_t size);
 

@@ -21,7 +21,6 @@
 #define PLATFORM__H_
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <mach/machine.h>
 
 #ifdef PLATFORM_EXTERN

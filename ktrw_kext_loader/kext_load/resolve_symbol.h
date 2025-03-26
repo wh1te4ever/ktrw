@@ -29,7 +29,7 @@
  * Description:
  * 	Tries to load the symbol database for this platform.
  */
-bool load_symbol_database(const char *database_path);
+bool load_symbol_database(void);
 
 /*
  * resolve_symbol

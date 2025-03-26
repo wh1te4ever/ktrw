@@ -158,15 +158,17 @@ next_line:
 // ---- Public API --------------------------------------------------------------------------------
 
 bool
-load_symbol_database(const char *database_path) {
+load_symbol_database() {
 	if (symbol_database != NULL) {
 		return true;
 	}
 	platform_init();
-	char symbol_file_path[1024];
-	snprintf(symbol_file_path, sizeof(symbol_file_path), "%s/%s_%s.txt",
-			database_path, platform.machine, platform.osversion);
-	symbol_database = map_file(symbol_file_path, &symbol_database_size);
+	char bundle_path[1024];
+	get_bundle_path(bundle_path, sizeof(bundle_path));
+	char database_path[1024];
+	snprintf(database_path, sizeof(database_path), "%s/kernel_symbols/%s_%s.txt",
+			bundle_path, platform.machine, platform.osversion);
+	symbol_database = map_file(database_path, &symbol_database_size);
 	if (symbol_database == NULL) {
 		WARNING("No kernel symbol database for %s %s", platform.machine, platform.osversion);
 		return false;

@@ -1,9 +1,10 @@
 TARGET = ktrw_gdb_stub.ikext
 
+APP_DIR = ktrw_kext_loader
+APP_KEXT_DIR = ../$(APP_DIR)/kexts
+
 ARCH = arm64
 SDK  = iphoneos
-KTRW_VERSION = 0.1.0
-ACTIVATION_DELAY = 30
 
 SYSROOT := $(shell xcrun --sdk $(SDK) --show-sdk-path)
 ifeq ($(SYSROOT),)
@@ -15,11 +16,8 @@ CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
 CFLAGS  = -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource
 CFLAGS += -O2
-CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token -Wno-incompatible-function-pointer-types -Wno-c2x-extensions -Wno-strict-prototypes
+CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token
 # TODO: -Wconversion
-
-DEFINES = -DKTRW_VERSION='"$(KTRW_VERSION)"' \
-	  -DKTRW_GDB_STUB_ACTIVATION_DELAY='$(ACTIVATION_DELAY)'
 
 LDFLAGS  = -Xlinker -kext -nostdlib -Xlinker -fatal_warnings
 
@@ -33,7 +31,7 @@ SOURCES = source/gdb_stub/gdb_cpu.c \
 	  source/debug.c \
 	  source/devicetree.c \
 	  source/jit_heap.c \
-	  source/ktrw.c \
+	  source/main.c \
 	  source/page_table.c \
 	  source/primitives.c \
 	  source/watchdog.c
@@ -59,6 +57,8 @@ HEADERS = source/gdb_stub/gdb_cpu.h \
 
 $(TARGET): $(SOURCES) $(HEADERS)
 	$(CC) $(CFLAGS) $(DEFINES) $(LDFLAGS) -o $@ $(SOURCES)
+	mkdir -p $(APP_KEXT_DIR)
+	cp $(TARGET) $(APP_KEXT_DIR)/$(TARGET)
 
 symbols: $(TARGET)
 	@nm -u $(TARGET)
