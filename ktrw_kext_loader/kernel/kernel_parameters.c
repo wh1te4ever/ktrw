@@ -60,6 +60,7 @@ static struct platform_initialization offsets[] = {
 	{ "iPhone10,1",            "16C101-16G77", offsets__iphone10_1__16C101 },
 	{ "iPhone10,6",            "16E227",       offsets__iphone10_1__16C101 },
 	{ "iPhone10,1|iPhone10,4", "17B102-17C54", offsets__iphone10_1__17B102 },
+	{ "iPhone10,4",            "16A404", 	   offsets__iphone10_1__16C101 },
 };
 
 // ---- Address initialization --------------------------------------------------------------------
@@ -89,12 +90,18 @@ addresses__iphone10_1__17C54() {
 	STATIC_ADDRESS(allproc) = 0xFFFFFFF0091EEC30;
 }
 
+static void
+addresses__iphone10_4__16A404() {
+	STATIC_ADDRESS(allproc) = 0xFFFFFFF0076D6C08;
+}
+
 static struct platform_initialization addresses[] = {
 	{ "iPhone10,1",            "16C101", addresses__iphone10_1__16C101 },
 	{ "iPhone10,6",            "16E227", addresses__iphone10_6__16E227 },
 	{ "iPhone10,1",            "16G77",  addresses__iphone10_1__16G77  },
 	{ "iPhone10,1|iPhone10,4", "17B102", addresses__iphone10_1__17B102 },
 	{ "iPhone10,1|iPhone10,4", "17C54",  addresses__iphone10_1__17C54  },
+	{ "iPhone10,4",            "16A404", addresses__iphone10_4__16A404 },
 };
 
 // ---- Public API --------------------------------------------------------------------------------

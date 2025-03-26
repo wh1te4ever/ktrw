@@ -51,6 +51,7 @@ static struct platform_initialization offsets[] = {
 	{ "iPhone10,1",            "16C101-16G77", offsets__iphone10_1__16C101 },
 	{ "iPhone10,6",            "16E227",       offsets__iphone10_1__16C101 },
 	{ "iPhone10,1|iPhone10,4", "17B102-17C54", offsets__iphone10_1__17B102 },
+	{ "iPhone10,4",            "16A404",       offsets__iphone10_1__16C101 },
 };
 
 // ---- KTRR parameter initialization -------------------------------------------------------------
@@ -142,12 +143,30 @@ parameters__iphone10_1__17C54() {
 	ADDRESS(CpuDataEntries)     = SLIDE(0xFFFFFFF0091D2C98);
 }
 
+static void
+parameters__iphone10_4__16A404() {
+	gPhysBase                   = kernel_read64(SLIDE(0xFFFFFFF0070B96E8));
+	gVirtBase                   = kernel_read64(SLIDE(0xFFFFFFF0070B96F0));
+	rorgn_begin                 = kernel_read64(SLIDE(0xFFFFFFF0070B99C8));
+	rorgn_end                   = kernel_read64(SLIDE(0xFFFFFFF0070B99D0));
+	cpu_ttep                    = kernel_read64(SLIDE(0xFFFFFFF0070B9498));
+	kernel_pmap                 = kernel_read64(SLIDE(0xFFFFFFF0070B9478));
+	ADDRESS(pmap_find_phys)     = SLIDE(0xFFFFFFF0071F8EF4);
+	ADDRESS(ml_phys_read_data)  = SLIDE(0xFFFFFFF0072047D4);
+	ADDRESS(ml_phys_write_data) = SLIDE(0xFFFFFFF007204A3C);
+	ADDRESS(ml_io_map)          = SLIDE(0xFFFFFFF00720A0F4);
+	ADDRESS(ldr_w0_x0__ret)     = SLIDE(0xFFFFFFF00711E968);
+	ADDRESS(str_w1_x0__ret)     = SLIDE(0xFFFFFFF0061EA01C);
+	ADDRESS(CpuDataEntries)     = SLIDE(0xFFFFFFF007638000);
+}
+
 static struct platform_initialization parameters[] = {
 	{ "iPhone10,1",            "16C101", parameters__iphone10_1__16C101 },
 	{ "iPhone10,6",            "16E227", parameters__iphone10_6__16E227 },
 	{ "iPhone10,1",            "16G77",  parameters__iphone10_1__16G77  },
 	{ "iPhone10,1|iPhone10,4", "17B102", parameters__iphone10_1__17B102 },
 	{ "iPhone10,1|iPhone10,4", "17C54",  parameters__iphone10_1__17C54  },
+	{ "iPhone10,4",            "16A404", parameters__iphone10_4__16A404 },
 };
 
 // ---- Public API --------------------------------------------------------------------------------
