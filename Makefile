@@ -1,5 +1,3 @@
-CFLAGS += -Wno-error=int-conversion
-
 TARGET_DIRECTORIES = pongo_kext_loader pongo_kextload ktrw_gdb_stub ktrw_usb_proxy
 
 all: $(TARGET_DIRECTORIES)
@@ -7,7 +5,7 @@ all: $(TARGET_DIRECTORIES)
 .PHONY: all $(TARGET_DIRECTORIES)
 
 $(TARGET_DIRECTORIES):
-	$(MAKE) -C $@ CFLAGS="$(CFLAGS)"
+	$(MAKE) -C $@
 
 CLEAN_TARGET_DIRECTORIES = $(TARGET_DIRECTORIES:%=clean-%)
 

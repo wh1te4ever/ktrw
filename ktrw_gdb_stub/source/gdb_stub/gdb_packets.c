@@ -19,7 +19,7 @@
 
 #include "gdb_packets.h"
 
-#include "../primitives.h"
+#include "primitives.h"
 
 #include "gdb_cpu.h"
 #include "gdb_internal.h"

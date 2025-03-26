@@ -21,7 +21,7 @@
 
 #include <stdarg.h>
 
-#include "../primitives.h"
+#include "primitives.h"
 
 #include "gdb_internal.h"
 #include "gdb_stub.h"

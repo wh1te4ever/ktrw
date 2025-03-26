@@ -1,10 +1,6 @@
 KTRW
 ===================================================================================================
 
-This fork of KTRW brings support for A11 devices running iOS 14.x, as well
-as a built-in patchfinder so you do not have to hunt for kernel offsets
-yourself.
-
 KTRW is an iOS kernel debugger for devices with an A11 SoC, such as the iPhone 8. It demonstrates
 how to use debug registers present on these devices to bypass KTRR, remap the kernel as writable,
 and load a kernel extension that implements a GDB stub, allowing full-featured kernel debugging
@@ -17,16 +13,6 @@ no longer used.
 [checkra1n]: https://checkra.in
 [pongoOS]: https://github.com/checkra1n/pongoOS
 
-Changes for iOS 14.x
-===================================================================================================
-1. OSKext_init_patch MAX_SEARCH changed to 300 instead of 30 so the patch is actually applied
-2. CTRR/KTRR patches from xnuspy were shoved in
-3. OSKext::slidePrelinkedExecutable zeroes vmaddr, so it needs to be patched to not do that
-4. Need to actually slide all segments' vmaddr inside kext_map (inside the pongo module)
-
-I suspect the last two are a result of me not understanding some changes made
-to the XNU kext loading code, but as asm patches they work fine so I don't
-see the need to spend more time on that.
 
 Bypassing KTRR
 ---------------------------------------------------------------------------------------------------
@@ -51,24 +37,15 @@ normally (that is, without being hijacked using the debug registers from another
 that the KTRR bypass is not persistent: it will be lost once the device sleeps.
 
 
-Using this fork of KTRW
+Using KTRW
 ---------------------------------------------------------------------------------------------------
-
-This fork is meant specifically for devices on iOS 14+. If you want to debug
-iOS 13.x or below, please use the original repository.
 
 KTRW consists of four components: the `pongo_kext_loader` utility, the `kextload.pongo-module`
 pongoOS module, the `ktrw_gdb_stub.ikext` kernel extension, and the `ktrw_usb_proxy` USB-to-TCP
-proxy utility. These can be built individually by running `make` in each subdirectory or
+proxy utility. These can be built individually by ruunning `make` in each subdirectory or
 collectively by running `make` in the top-level directory.
 
-This fork *does not* support loading of arbitrary kernel extensions. If you need
-that functionality, please use the original repository.
-
 To use KTRW, we'll run three utilities: [checkra1n], `pongo_kext_loader`, and `ktrw_usb_proxy`.
-
-`pongo_kext_loader` will upload the `kextload` module. That will run a
-patchfinder, "insert" the KTRW kext into the kernelcache, and boot XNU.
 
 Checkra1n uses the checkm8 SecureROM exploit to establish a pre-boot environment called pongoOS
 capable of loading arbitrary code modules and patching the kernel. Running the following command
@@ -76,12 +53,21 @@ causes checkra1n to listen for attached iOS devices in DFU mode and boot pongoOS
 
 	$ /Applications/checkra1n.app/Contents/MacOS/checkra1n -c -p
 
+By itself pongoOS does not provide the ability to insert XNU kernel extensions into the kernelcache
+on the device; in order to do this we use `pongo_kext_loader` and `kextload.pongo-module`. The
+`kextload` pongoOS module adds two new commands to the pongoOS shell: `kernelcache-symbols`, which
+allows uploading a symbol table to resolve kernel symbols, and `kextload`, which inserts an
+uploaded kernel extension into the kernelcache. The `pongo_kext_loader` utility glues everything
+together: it listens for attached pongoOS devices, loads `kextload.pongo-module`, inserts the
+`ktrw_gdb_stub.ikext` kernel extension into the iOS kernelcache, and boots XNU.
+
 Run the following command to have `pongo_kext_loader` load `ktrw_gdb_stub.ikext` on the iOS device
 at boot:
 
 	$ pongo_kext_loader/pongo_kext_loader \
-        -l pongo_kextload/kextload.pongo-module \
-        -k ktrw_gdb_stub/ktrw_gdb_stub.ikext
+		pongo_kextload/kextload.pongo-module \
+		ktrw_gdb_stub/kernel_symbols \
+		ktrw_gdb_stub/ktrw_gdb_stub.ikext
 
 The final utility that needs to run is `ktrw_usb_proxy`. `ktrw_usb_proxy` is needed to communicate
 with the kernel extension over USB and relay the data over TCP so that LLDB can connect to it. It
@@ -283,9 +269,13 @@ kernelcache and start downloading data off the device. This may take a long time
 Adding support for new platforms
 ---------------------------------------------------------------------------------------------------
 
-This fork of KTRW contains a patchfinder for iOS 14.x. You do not have to
-find any offsets yourself (they will be found when the module runs inside
-pongoOS)
+Kernel extensions are linked against the symbols supplied in the `ktrw_gdb_stub/kernel_symbols`
+directory. The files in this directory are named `<hardware-version>_<build-version>.txt`, where
+`<hardware-version>` is the hardware identifier (e.g. iPhone10,1) and `<build-version>` is the
+iOS build version (e.g. 16C101). There must be a single file per kernelcache UUID, so more
+hardware/build version pairs may be supported than what is implied by the file name. Each file
+should declare all supported hardware/build pairs in the header.
+
 
 Breakpoints and watchpoints
 ---------------------------------------------------------------------------------------------------

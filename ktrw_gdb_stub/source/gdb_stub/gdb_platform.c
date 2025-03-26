@@ -23,7 +23,7 @@
 
 // ---- Macros ------------------------------------------------------------------------------------
 
-#include "../if_value.h"
+#include "if_value.h"
 
 #define ARRAY_COUNT(a)	(sizeof(a) / sizeof(a[0]))
 
