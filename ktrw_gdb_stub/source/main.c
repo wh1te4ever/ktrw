@@ -17,10 +17,8 @@
 // limitations under the License.
 //
 
-
 #include "gdb_stub/gdb_stub.h"
 
-#include "third_party/boot_args.h"
 #include "debug.h"
 #include "devicetree.h"
 #include "jit_heap.h"
@@ -28,6 +26,9 @@
 #include "page_table.h"
 #include "usb/usb.h"
 #include "watchdog.h"
+
+#include "third_party/boot_args.h"
+#include "third_party/kmod.h"
 
 // ---- Kernel symbols ----------------------------------------------------------------------------
 
@@ -92,11 +93,21 @@ debug_cpu_restart(int cpu_id) {
 
 static void
 debug_cpu_wait_for_halt(int cpu_id) {
+	// Wait for the halt to show up in DBGWRAP.
 	for (;;) {
 		if (rDBGWRAP(cpu_id) & DBGWRAP_CpuIsHalted) {
 			break;
 		}
 	}
+	// Wait for the halt to show up in EDPRSR. This shouldn't be necessary but it's helpful to
+	// know that both registers agree.
+	for (;;) {
+		if (rEDPRSR(cpu_id) & EDPRSR_HALTED) {
+			break;
+		}
+	}
+	// Unlock the OS Lock to enable debug access.
+	rOSLAR(cpu_id) = 0;
 }
 
 static void
@@ -977,6 +988,11 @@ prepare_cpus_for_debugging() {
 			rEDLAR(cpu_id) = 0xC5ACCE55;
 		}
 	}
+	for (int cpu_id = 0; cpu_id < CPU_COUNT; cpu_id++) {
+		if (valid_cpu_id(cpu_id)) {
+			while (rEDLSR(cpu_id) & EDLSR_SLK) {}
+		}
+	}
 	// Halt all CPUs. Ensure that this is done safely to minimize the chance of panicking the
 	// system.
 	for (int cpu_id = 0; cpu_id < CPU_COUNT; cpu_id++) {
@@ -1119,6 +1135,8 @@ check_cpu(int cpu_id) {
 	if (!newly_halted) {
 		return;
 	}
+	// Since we're newly halted, unlock the OS Lock to enable debug access.
+	rOSLAR(cpu_id) = 0;
 	// Now we need to check EDSCR so that we can report the reason for the exception.
 	uint32_t edscr = rEDSCR(cpu_id);
 	// The bits we care about are EDSCR.STATUS, which contain the debug status.
@@ -1270,8 +1288,10 @@ gdb_stub_thread(void *parameter, int wait_result) {
 
 // ---- Entry -------------------------------------------------------------------------------------
 
-uint32_t
-_kext_start(uint64_t value) {
+KMOD_DECL(ktrw, KTRW_VERSION)
+
+static int
+ktrw_module_start(struct kmod_info *kmod, void *data) {
 	thread_t thread;
 	int kr = kernel_thread_start(gdb_stub_thread, NULL, &thread);
 	if (kr != 0) {
@@ -1279,4 +1299,10 @@ _kext_start(uint64_t value) {
 	}
 	thread_deallocate(thread);
 	return 0;
+}
+
+static int
+ktrw_module_stop(struct kmod_info *kmod, void *data) {
+	// No stopping KTRW.
+	return 1;
 }

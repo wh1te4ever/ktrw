@@ -3,13 +3,12 @@ TARGET = ktrw_usb_proxy
 DEBUG ?= 0
 
 CFLAGS = -O2 -Wall -Werror
-CFLAGS += -Wno-deprecated-declarations
 
 ifneq ($(DEBUG),0)
 CFLAGS += -DDEBUG=$(DEBUG)
 endif
 
-SOURCES = main.c
+SOURCES = ktrw_usb_proxy.c
 
 HEADERS =
 
