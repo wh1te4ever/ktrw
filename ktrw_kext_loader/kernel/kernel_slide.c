@@ -198,6 +198,67 @@ next:
 	return false;
 }
 
+bool get_kbase_via_kext(void) {
+    struct {
+		uint32_t pri_prot, pri_max_prot, pri_inheritance, pri_flags;
+		uint64_t pri_offset;
+		uint32_t pri_behavior, pri_user_wired_cnt, pri_user_tag, pri_pages_resident, pri_pages_shared_now_private, pri_pages_swapped_out, pri_pages_dirtied, pri_ref_cnt, pri_shadow_depth, pri_share_mode, pri_private_pages_resident, pri_shared_pages_resident, pri_obj_id, pri_depth;
+		uint64_t pri_addr;
+		uint64_t pri_sz;
+	} pri;
+
+    char kext_name[KMOD_MAX_NAME];
+    CFStringRef kext_name_cf;
+    CFNumberRef kext_addr_cf;
+    CFArrayRef kext_names;
+    CFDictionaryRef kexts_info;
+    CFDictionaryRef kext_info;
+    uint64_t kext_addr;
+
+    for(pri.pri_addr = 0; proc_pidinfo(0, PROC_PIDREGIONINFO, pri.pri_addr, &pri, sizeof(pri)) == sizeof(pri); pri.pri_addr += pri.pri_sz) {
+        if(pri.pri_prot == VM_PROT_READ && pri.pri_user_tag == VM_KERN_MEMORY_OSKEXT) {
+            break;
+        }
+    }
+
+    if(kernel_read(pri.pri_addr + LOADED_KEXT_SUMMARY_HDR_NAME_OFF, kext_name, sizeof(kext_name)) != true) return 0;
+    printf("kext_name: %s\n", kext_name);
+
+    uint64_t kext_addr_slid = kernel_read64(pri.pri_addr + LOADED_KEXT_SUMMARY_HDR_ADDR_OFF);
+    printf("kext_addr_slid: 0x%llx\n", kext_addr_slid);
+
+    if((kext_name_cf = CFStringCreateWithCStringNoCopy(kCFAllocatorDefault, kext_name, kCFStringEncodingUTF8, kCFAllocatorNull)) == NULL) return 0;
+
+    if((kext_names = CFArrayCreate(kCFAllocatorDefault, (const void **)&kext_name_cf, 1, &kCFTypeArrayCallBacks)) == NULL) return 0;
+
+    if((kexts_info = OSKextCopyLoadedKextInfo(kext_names, NULL)) == NULL) return 0;
+
+    if(CFGetTypeID(kexts_info) != CFDictionaryGetTypeID())  return 0;
+
+    if(CFDictionaryGetCount(kexts_info) != 1)   return 0;
+
+    if((kext_info = CFDictionaryGetValue(kexts_info, kext_name_cf)) == NULL)   return 0;
+
+    if(CFGetTypeID(kext_info) != CFDictionaryGetTypeID())   return 0;
+
+    if((kext_addr_cf = CFDictionaryGetValue(kext_info, CFSTR(kOSBundleLoadAddressKey))) == NULL)  return 0;
+
+    if(CFGetTypeID(kext_addr_cf) != CFNumberGetTypeID())    return 0;
+
+    if(!(CFNumberGetValue(kext_addr_cf, kCFNumberSInt64Type, &kext_addr)))  return 0;
+
+    if(!(kext_addr_slid > kext_addr))   return 0;
+
+    uint64_t kbase = 0xfffffff007004000 + (kext_addr_slid - kext_addr);
+	uint64_t kslide = kbase - 0xfffffff007004000;
+
+	kernel_slide = kslide;
+
+	did_set_kernel_slide();
+
+    return true;
+}
+
 bool
 kernel_slide_init() {
 	if (kernel_slide != 0) {
@@ -212,6 +273,16 @@ kernel_slide_init() {
 	if (!ok) {
 		return false;
 	}
+	//Get kernel base via kext
+	printf("Going to call get_kbase_via_kext\n");
+	sleep(3);
+	ok = get_kbase_via_kext();
+	printf("Finished call get_kbase_via_kext\n");
+	sleep(3);
+	if (ok) {
+		return true;
+	}
+
 	// Check if the kernel base is stashed in task_info(TASK_DYLD_INFO).
 	printf("Going to call check_task_dyld_info\n");
 	sleep(3);

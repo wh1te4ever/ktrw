@@ -22,6 +22,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #ifdef KERNEL_SLIDE_EXTERN
 #define extern KERNEL_SLIDE_EXTERN
@@ -51,6 +52,18 @@ bool kernel_slide_init(void);
  * 	known to reside within the kernel image.
  */
 bool kernel_slide_init_with_kernel_image_address(uint64_t address);
+
+#define PROC_PIDREGIONINFO (7)
+#define VM_KERN_MEMORY_OSKEXT (5)
+#define LOADED_KEXT_SUMMARY_HDR_NAME_OFF (0x10)
+#define LOADED_KEXT_SUMMARY_HDR_ADDR_OFF (0x60)
+#define kOSBundleLoadAddressKey "OSBundleLoadAddress"
+
+int
+proc_pidinfo(int, int, uint64_t, void *, int);
+
+CFDictionaryRef
+OSKextCopyLoadedKextInfo(CFArrayRef, CFArrayRef);
 
 #undef extern
 
