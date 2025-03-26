@@ -6,3 +6,7 @@ kernelcache.iPhone10,1.18D70.nam
 kernelcache.iPhone10,1.18D70.id2
 kernelcache.iPhone10,1.18D70.til
 *.i64
+ktrw_gdb_stub/ktrw_gdb_stub.ikext
+pongo_kext_loader/pongo_kext_loader
+pongo_kextload/kextload.pongo-module
+ktrw_usb_proxy/ktrw_usb_proxy

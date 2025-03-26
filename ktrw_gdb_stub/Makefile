@@ -15,7 +15,7 @@ CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
 CFLAGS  = -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource
 CFLAGS += -O2
-CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token
+CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token -Wno-incompatible-function-pointer-types -Wno-c2x-extensions -Wno-strict-prototypes
 # TODO: -Wconversion
 
 DEFINES = -DKTRW_VERSION='"$(KTRW_VERSION)"' \

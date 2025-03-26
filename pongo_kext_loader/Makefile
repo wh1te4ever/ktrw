@@ -2,7 +2,7 @@ TARGET = pongo_kext_loader
 
 DEBUG ?= 0
 
-CFLAGS = -O2 -Wall -Werror
+CFLAGS = -O2 -Wall -Werror -Wno-incompatible-function-pointer-types -Wno-c2x-extensions -Wno-strict-prototypes
 
 ifneq ($(DEBUG),0)
 CFLAGS += -DDEBUG=$(DEBUG)

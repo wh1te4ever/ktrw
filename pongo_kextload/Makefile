@@ -14,7 +14,7 @@ CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
 CFLAGS  = -mabi=$(ABI) -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource/third_party
 CFLAGS += -O2
-CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion
+CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token -Wconversion -Wno-incompatible-function-pointer-types -Wno-c2x-extensions -Wno-strict-prototypes
 
 LDFLAGS  = -Xlinker -kext -nostdlib -Xlinker -fatal_warnings
 

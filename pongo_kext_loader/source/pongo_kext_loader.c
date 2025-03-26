@@ -1134,7 +1134,7 @@ pongo_usb_kext_loader() {
 	}
 	// Create a notification port on which to listen for notifications that pongoOS devices
 	// have been added or removed, and add the notification port to the port set.
-	IONotificationPortRef notify_port = IONotificationPortCreate(kIOMasterPortDefault);
+	IONotificationPortRef notify_port = IONotificationPortCreate(kIOMainPortDefault);
 	mach_port_t notify_mach_port = IONotificationPortGetMachPort(notify_port);
 	kr = mach_port_insert_member(mach_task_self(), notify_mach_port, state.port_set);
 	if (kr != KERN_SUCCESS) {
@@ -1200,7 +1200,7 @@ fail_4:
 fail_3:
 	IONotificationPortDestroy(notify_port);
 fail_2:
-	mach_port_destroy(mach_task_self(), state.port_set);
+	mach_port_deallocate(mach_task_self(), state.port_set);
 fail_1:
 	close(state.kq);
 fail_0:

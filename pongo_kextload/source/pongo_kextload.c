@@ -89,7 +89,7 @@ static bool kernelcache_uuid_found = false;
 
 // Find the UUID of the current kernelcache. Idempotent.
 static void
-kernelcache_find_uuid() {
+kernelcache_find_uuid(void) {
 	if (kernelcache_uuid_found) {
 		return;
 	}
@@ -142,7 +142,7 @@ found:;
 // Handles the "kernelcache-symbols" command, which is used to process the bulk uploaded data as a
 // serialized symbol table.
 static void
-command_kernelcache_symbols() {
+command_kernelcache_symbols(void) {
 	// Grab the symbol table data.
 	size_t size = loader_xfer_recv_count;
 	loader_xfer_recv_count = 0;
@@ -1001,7 +1001,7 @@ OSKext_init_patch(xnu_pf_patch_t *patch, void *cacheable_stream) {
 //        OSKext::setVMAttributes() is called. (Technically this is only needed on
 //        _PrelinkKASLROffsets kernelcaches, but it is safe to apply always.)
 static void
-kextload_patch() {
+kextload_patch(void) {
 	xnu_pf_patchset_t *patchset = xnu_pf_patchset_create(XNU_PF_ACCESS_32BIT);
 
 	// Patch out KTRR MMU lockdown.
@@ -1075,7 +1075,7 @@ kextload_patch() {
 
 // The pre-boot hook for loading kernel extensions.
 static void
-kextload_preboot_hook() {
+kextload_preboot_hook(void) {
 	puts("KTRW pongoOS kextload pre-boot hook");
 #if DISABLE_CHECKRA1N_KERNEL_PATCHES
 	puts("Skipping checkra1n pre-boot hook");
@@ -1091,7 +1091,7 @@ kextload_preboot_hook() {
 // ---- Pongo module ------------------------------------------------------------------------------
 
 void
-module_entry() {
+module_entry(void) {
 	puts("KTRW pongoOS kextload module");
 	next_preboot_hook = preboot_hook;
 	preboot_hook = kextload_preboot_hook;
