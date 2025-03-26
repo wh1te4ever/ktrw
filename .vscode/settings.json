@@ -1,5 +1,7 @@
 {
     "files.associations": {
-        "kernel_extern.h": "c"
+        "kernel_extern.h": "c",
+        "kernel_parameters.h": "c",
+        "kernel_slide.h": "c"
     }
 }

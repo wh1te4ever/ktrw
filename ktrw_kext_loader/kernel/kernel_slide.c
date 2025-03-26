@@ -21,6 +21,7 @@
 #include "kernel_slide.h"
 
 #include <assert.h>
+#include <unistd.h>
 #include <mach-o/loader.h>
 
 #include "kernel_memory.h"
@@ -203,12 +204,20 @@ kernel_slide_init() {
 		return true;
 	}
 	// Initialize the parameters.
+	printf("Going to call kernel_parameters_init\n");
+	sleep(3);
 	bool ok = kernel_parameters_init();
+	printf("Finished call kernel_parameters_init\n");
+	sleep(3);
 	if (!ok) {
 		return false;
 	}
 	// Check if the kernel base is stashed in task_info(TASK_DYLD_INFO).
+	printf("Going to call check_task_dyld_info\n");
+	sleep(3);
 	ok = check_task_dyld_info();
+	printf("Finished call check_task_dyld_info\n");
+	sleep(3);
 	if (ok) {
 		return true;
 	}
@@ -220,7 +229,11 @@ kernel_slide_init() {
 		}
 	}
 	// Try an unsafe heap scan. This is a last resort!
+	printf("Going to call init_with_unsafe_heap_scan\n");
+	sleep(3);
 	ok = init_with_unsafe_heap_scan();
+	printf("Finished init_with_unsafe_heap_scan\n");
+	sleep(3);
 	if (ok) {
 		return true;
 	}

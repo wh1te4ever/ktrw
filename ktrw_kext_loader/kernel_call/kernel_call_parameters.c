@@ -23,6 +23,7 @@
 #include "kernel_slide.h"
 #include "log.h"
 #include "platform_match.h"
+#include <unistd.h>
 
 // ---- Offset initialization ---------------------------------------------------------------------
 
@@ -122,7 +123,11 @@ static struct platform_initialization addresses[] = {
 
 bool
 kernel_call_parameters_init() {
+	printf("Going to call kernel_slide_init\n");
+	sleep(3);
 	bool ok = kernel_slide_init();
+	printf("Finished call kernel_slide_init\n");
+	sleep(3);
 	if (!ok) {
 		return false;
 	}

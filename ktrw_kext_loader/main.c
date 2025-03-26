@@ -6,6 +6,34 @@
 #include "kext_load.h"
 #include "ktrr_bypass.h"
 #include "log.h"
+#include <unistd.h>
+#include <inttypes.h>
+
+task_t tfp0 = MACH_PORT_NULL;
+
+static kern_return_t
+init_kernrw(void) {
+	kern_return_t ret = task_for_pid(mach_task_self(), 0, &tfp0);
+	mach_port_t host;
+	pid_t pid;
+
+	if(ret != KERN_SUCCESS) {
+		host = mach_host_self();
+		if(MACH_PORT_VALID(host)) {
+			printf("host: 0x%" PRIx32 "\n", host);
+			ret = host_get_special_port(host, HOST_LOCAL_NODE, 4, &tfp0);
+			mach_port_deallocate(mach_task_self(), host);
+		}
+	}
+	if(ret == KERN_SUCCESS && MACH_PORT_VALID(tfp0)) {
+		if(pid_for_task(tfp0, &pid) == KERN_SUCCESS && pid == 0) {
+			return ret;
+		}
+		mach_port_deallocate(mach_task_self(), tfp0);
+	}
+
+	return KERN_FAILURE;
+}
 
 int main(int argc, const char *argv[]) {
 	int ret = 1;
@@ -23,11 +51,11 @@ int main(int argc, const char *argv[]) {
 	}
 	// Try to get the kernel task port using task_for_pid().
 	kernel_task_port = MACH_PORT_NULL;
-	task_for_pid(mach_task_self(), 0, &kernel_task_port);
-	if (kernel_task_port == MACH_PORT_NULL) {
+	if(init_kernrw() != KERN_SUCCESS) {
 		ERROR("Could not get kernel task port");
 		goto done_0;
 	}
+	kernel_task_port = tfp0;
 	INFO("task_for_pid(0) = 0x%x", kernel_task_port);
 	// Initialize our kernel function calling capability.
 	ok = kernel_call_init();
