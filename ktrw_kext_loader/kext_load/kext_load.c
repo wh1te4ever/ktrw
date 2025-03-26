@@ -39,7 +39,7 @@
 
 
 // The name of the kext entry point symbol.
-static const char *KEXT_START_SYMBOL = "__kext_start";
+static const char *KEXT_START_SYMBOL = "_ktrw_module_start";
 
 // ---- Mach-O parsing ----------------------------------------------------------------------------
 

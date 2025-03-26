@@ -12,3 +12,4 @@ pongo_kextload/kextload.pongo-module
 ktrw_usb_proxy/ktrw_usb_proxy
 ktrw_kext_loader/kexts/ktrw_gdb_stub.ikext
 ktrw_kext_loader/ktrw_kext_loader
+kernel
