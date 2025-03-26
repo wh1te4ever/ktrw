@@ -12,12 +12,13 @@ ifeq ($(SYSROOT),)
 $(error Could not find SDK $(SDK))
 endif
 CLANG := $(shell xcrun --sdk $(SDK) --find clang)
-CC := $(CLANG) -isysroot $(SYSROOT) -arch $(ARCH)
+CC := $(CLANG) -isysroot ${HOME}/theos/sdks/iPhoneOS12.4.sdk -arch $(ARCH)
 
 CFLAGS  = -fno-builtin -fno-common -mkernel
 CFLAGS += -Isource
 CFLAGS += -O2
 CFLAGS += -Wall -Werror -Wpedantic -Wno-gnu -Wno-language-extension-token
+CFLAGS += -Wno-incompatible-function-pointer-types -Wno-c2x-extensions -Wno-strict-prototypes
 # TODO: -Wconversion
 
 DEFINES = -DKTRW_VERSION='"$(KTRW_VERSION)"'
