@@ -179,11 +179,12 @@ pongo_usb_open(io_service_t service, mach_port_t notification_port_set) {
 	}
 	// Add the async port to the notification port set.
 	kr = mach_port_insert_member(mach_task_self(), io_port, notification_port_set);
-	mach_port_deallocate(mach_task_self(), io_port);
-	if (kr != KERN_SUCCESS) {
-		ERROR("Could not add pongoOS USB asynchronous notification port to port set");
-		goto fail_4;
-	}
+	printf("io_port = %x, kr = 0x%x (%s)\n", io_port, kr, mach_error_string(kr));
+	// mach_port_deallocate(mach_task_self(), io_port);
+	// if (kr != KERN_SUCCESS) {
+	// 	ERROR("Could not add pongoOS USB asynchronous notification port to port set");
+	// 	goto fail_4;
+	// }
 	// Create the pongo_usb_device.
 	pongo_usb_device pongo = calloc(1, sizeof(*pongo));
 	assert(pongo != NULL);
