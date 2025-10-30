@@ -173,11 +173,12 @@ ktrw_usb_open(io_service_t service, mach_port_t notification_port_set) {
 	}
 	// Add the async port to the notification port set.
 	kr = mach_port_insert_member(mach_task_self(), io_port, notification_port_set);
-	mach_port_deallocate(mach_task_self(), io_port);
-	if (kr != KERN_SUCCESS) {
-		printf("Error: Could not add KTRW USB asynchronous notification port to port set\n");
-		goto fail_4;
-	}
+	printf("io_port = %x, kr = 0x%x (%s)\n", io_port, kr, mach_error_string(kr));
+	// mach_port_deallocate(mach_task_self(), io_port);
+	// if (kr != KERN_SUCCESS) {
+	// 	printf("Error: Could not add KTRW USB asynchronous notification port to port set\n");
+	// 	goto fail_4;
+	// }
 	// Create the ktrw_usb_device.
 	ktrw_usb_device ktrw = calloc(1, sizeof(*ktrw));
 	assert(ktrw != NULL);
